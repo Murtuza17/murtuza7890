@@ -1,0 +1,227 @@
+/* ===========================================================================
+   Hand-written CSS. No framework, no web fonts.
+
+   A webfont is a render-blocking request on a 2G link, and the people who use
+   this are the reason that matters. System stack only.
+
+   The audience is a livestock assistant on a cheap Android phone, outdoors, in
+   sunlight, during an outbreak. So: high contrast, large targets, and exactly
+   one thing shouting at a time — expiry urgency. Everything else stays quiet.
+   =========================================================================== */
+
+:root {
+  --ink:        #14181d;
+  --ink-soft:   #4a545e;
+  --ink-faint:  #6b7681;
+  --paper:      #ffffff;
+  --page:       #f2f4f6;
+  --line:       #d6dbe0;
+  --line-soft:  #e6eaee;
+
+  /* Expiry bands — the visual spine. Deliberately the boldest colour here. */
+  --expired:    #8c1d18;
+  --expired-bg: #fdecea;
+  --critical:   #a8320a;
+  --critical-bg:#fdeee6;
+  --soon:       #8a5a00;
+  --soon-bg:    #fdf3e0;
+  --watch:      #37506b;
+  --watch-bg:   #eef2f7;
+  --ok:         #1f5c3d;
+  --ok-bg:      #e9f4ee;
+
+  --accent:     #14538a;
+  --accent-ink: #ffffff;
+  --danger:     #8c1d18;
+
+  --tap: 48px;             /* spec asks 44 minimum; gloves and haste say more */
+  --radius: 10px;
+  --pad: 14px;
+
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  font-size: 16px;               /* never below 16: iOS zooms inputs otherwise */
+  line-height: 1.45;
+  color: var(--ink);
+  background: var(--page);
+  -webkit-text-size-adjust: 100%;
+}
+
+/* No horizontal scroll, ever. Long batch numbers and clinic names must wrap
+   rather than push the layout sideways. */
+body, #root { overflow-x: hidden; }
+h1, h2, h3, p, li, td, th, span, div { overflow-wrap: anywhere; }
+
+button, input, select, textarea { font: inherit; color: inherit; }
+
+/* --------------------------------------------------------------------- shell */
+.shell { min-height: 100%; display: flex; flex-direction: column; }
+
+.topbar {
+  background: var(--ink); color: #fff;
+  padding: 10px var(--pad);
+  display: flex; align-items: center; gap: 10px;
+}
+.topbar-clinic { font-weight: 650; font-size: 15px; line-height: 1.2; }
+.topbar-village { font-size: 12.5px; color: #aeb8c2; }
+.topbar-spacer { margin-left: auto; }
+
+.linkish {
+  background: none; border: 0; color: #aeb8c2; text-decoration: underline;
+  padding: 8px; min-height: var(--tap); cursor: pointer;
+}
+
+/* Status strip. Colour AND icon AND words — sunlight kills colour first, and
+   red/green is unreliable for roughly 1 in 12 men regardless. */
+.strip {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px var(--pad); font-size: 13.5px; font-weight: 600;
+  border-bottom: 1px solid var(--line);
+}
+.strip-offline { background: #fdf3e0; color: #7a4f00; }
+.strip-syncing { background: #eef2f7; color: #2b4763; }
+.strip-stale   { background: var(--page); color: var(--ink-soft); font-weight: 500; }
+.strip-error   { background: var(--expired-bg); color: var(--expired); }
+
+.tabs { display: flex; background: var(--paper); border-bottom: 1px solid var(--line); }
+.tab {
+  flex: 1; min-height: var(--tap); border: 0; background: none;
+  padding: 10px 4px 8px; font-size: 13.5px; font-weight: 600; color: var(--ink-faint);
+  border-bottom: 3px solid transparent; cursor: pointer;
+}
+.tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-count {
+  display: inline-block; min-width: 20px; padding: 0 5px; margin-left: 4px;
+  background: var(--accent); color: #fff; border-radius: 10px;
+  font-size: 11.5px; line-height: 18px; vertical-align: 1px;
+}
+
+main { flex: 1; padding: var(--pad); padding-bottom: 40px; }
+
+/* --------------------------------------------------------------------- cards */
+.card {
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: var(--pad); margin-bottom: 10px;
+}
+.card-head { display: flex; align-items: flex-start; gap: 10px; }
+.card-title { font-weight: 650; font-size: 15.5px; line-height: 1.25; flex: 1; }
+.card-sub { color: var(--ink-soft); font-size: 13px; margin-top: 2px; }
+.card-meta { color: var(--ink-faint); font-size: 12.5px; margin-top: 6px; }
+
+.qty { text-align: right; flex-shrink: 0; }
+.qty-n { font-size: 22px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.qty-u { font-size: 11.5px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: .04em; }
+
+/* Expiry pill — the one place we spend visual boldness. */
+.pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: 999px;
+  font-size: 12.5px; font-weight: 650; white-space: nowrap;
+  border: 1px solid currentColor;
+}
+.pill-icon { font-weight: 800; }
+.band-expired  { color: var(--expired);  background: var(--expired-bg); }
+.band-critical { color: var(--critical); background: var(--critical-bg); }
+.band-soon     { color: var(--soon);     background: var(--soon-bg); }
+.band-watch    { color: var(--watch);    background: var(--watch-bg); }
+.band-ok       { color: var(--ok);       background: var(--ok-bg); }
+
+.left-rule { border-left: 5px solid var(--line); }
+.left-rule.band-expired  { border-left-color: var(--expired); }
+.left-rule.band-critical { border-left-color: var(--critical); }
+.left-rule.band-soon     { border-left-color: var(--soon); }
+.left-rule.band-watch    { border-left-color: var(--watch); }
+.left-rule.band-ok       { border-left-color: var(--ok); }
+
+.flag {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 8px;
+  padding: 6px 10px; border-radius: 8px; font-size: 12.5px; font-weight: 600;
+  background: var(--soon-bg); color: var(--soon);
+}
+.flag-quiet { background: var(--page); color: var(--ink-soft); font-weight: 500; }
+
+/* ------------------------------------------------------------------- buttons */
+.btn {
+  display: block; width: 100%; min-height: var(--tap);
+  padding: 12px 14px; border-radius: var(--radius);
+  border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink);
+  font-size: 16px; font-weight: 650; cursor: pointer; margin-top: 12px;
+}
+.btn:active { transform: translateY(1px); }
+.btn[disabled] { opacity: .5; cursor: not-allowed; }
+.btn-quiet { background: var(--paper); color: var(--accent); }
+.btn-danger { background: var(--paper); color: var(--danger); border-color: var(--danger); }
+.btn-row { display: flex; gap: 8px; }
+.btn-row .btn { margin-top: 12px; }
+
+/* -------------------------------------------------------------------- forms */
+.field { margin-top: 12px; }
+.field label { display: block; font-size: 13.5px; font-weight: 600; margin-bottom: 5px; }
+.field .hint { font-weight: 400; color: var(--ink-faint); }
+.input, select.input {
+  width: 100%; min-height: var(--tap); padding: 11px 12px;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper);
+}
+.input:focus-visible, .btn:focus-visible, .tab:focus-visible {
+  outline: 3px solid var(--accent); outline-offset: 2px;
+}
+.pin { letter-spacing: .5em; font-size: 22px; text-align: center; font-variant-numeric: tabular-nums; }
+
+/* --------------------------------------------------------------------- misc */
+.note {
+  padding: 11px 12px; border-radius: var(--radius); font-size: 13.5px;
+  border: 1px solid; margin-top: 12px;
+}
+.note-error { background: var(--expired-bg); color: var(--expired); border-color: #f0c6c2; }
+.note-info  { background: var(--watch-bg);   color: var(--watch);   border-color: #c9d6e5; }
+.note-warn  { background: var(--soon-bg);    color: var(--soon);    border-color: #ecd8a8; }
+
+.empty { text-align: center; padding: 34px 18px; color: var(--ink-soft); }
+.empty-title { font-weight: 650; color: var(--ink); margin-bottom: 6px; }
+
+.section-title {
+  font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--ink-faint); margin: 20px 0 8px;
+}
+.section-title:first-child { margin-top: 0; }
+
+/* Handoff codes — read aloud over a bad phone line, so make them enormous. */
+.codebox { text-align: center; padding: 16px; border-radius: var(--radius); background: var(--page); margin-top: 12px; }
+.codebox-label { font-size: 12.5px; font-weight: 650; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .05em; }
+.codebox-code {
+  font-size: 40px; font-weight: 700; letter-spacing: .12em;
+  font-variant-numeric: tabular-nums; line-height: 1.15; margin-top: 4px;
+}
+
+.sheet-backdrop {
+  position: fixed; inset: 0; background: rgba(12, 16, 20, .55);
+  display: flex; align-items: flex-end; z-index: 20;
+}
+.sheet {
+  background: var(--paper); width: 100%; max-height: 88vh; overflow-y: auto;
+  border-radius: 16px 16px 0 0; padding: 18px var(--pad) 28px;
+}
+.sheet h2 { margin: 0 0 4px; font-size: 18px; }
+
+.trail { list-style: none; margin: 10px 0 0; padding: 0; font-size: 13px; }
+.trail li { padding: 7px 0; border-top: 1px solid var(--line-soft); color: var(--ink-soft); }
+.trail li:first-child { border-top: 0; }
+.trail b { color: var(--ink); font-weight: 600; }
+
+.queue-item { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line-soft); }
+.queue-item:first-child { border-top: 0; }
+.queue-what { flex: 1; font-size: 14px; }
+.queue-state { font-size: 12.5px; font-weight: 650; white-space: nowrap; }
+.queue-waiting { color: var(--soon); }
+.queue-done { color: var(--ok); }
+.queue-rejected { color: var(--expired); }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

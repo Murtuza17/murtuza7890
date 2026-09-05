@@ -15,7 +15,6 @@
     "test:race": "./scripts/test-db.sh --race"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.115.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

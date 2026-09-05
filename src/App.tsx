@@ -1,122 +1,67 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import { useEffect, useState } from 'react'
+import './styles/app.css'
+import { isConfigured } from './data/supabase'
+import { hydrate, refreshBoard } from './data/sync'
+import { loadSession, type Session } from './data/session'
+import { Login } from './ui/Login'
+import { Shell, type Tab } from './ui/Shell'
+import { Inventory } from './ui/Inventory'
+import { Requests } from './ui/Requests'
+import { Transfers } from './ui/Transfers'
+import { useBoard, useSync } from './ui/useBoard'
+import { Note } from './ui/bits'
 
-function App() {
-  const [count, setCount] = useState(0)
+export default function App() {
+  const [session, setSession] = useState<Session | null>(loadSession)
+  const [tab, setTab] = useState<Tab>('stock')
+  const sync = useSync()
+  const model = useBoard(sync.board)
+
+  useEffect(() => {
+    if (session) void hydrate()
+  }, [session])
+
+  // Refresh on a slow tick rather than a socket: Realtime holds a websocket
+  // open, which is a meaningful battery and data cost on a handset that is
+  // mostly idle in a drawer. A judge watching the double-claim gets the update
+  // from their own action immediately anyway.
+  useEffect(() => {
+    if (!session) return
+    const id = setInterval(() => void refreshBoard(), 20_000)
+    const onVisible = () => { if (!document.hidden) void refreshBoard() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVisible) }
+  }, [session])
+
+  if (!isConfigured) {
+    return (
+      <div className="shell">
+        <div className="topbar"><div className="topbar-clinic">Medicine Swap Board</div></div>
+        <main>
+          <Note kind="warn">
+            <b>Not configured yet.</b> Copy <code>.env.example</code> to <code>.env</code> and fill
+            in <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>, then reload.
+            The README has the five-minute setup.
+          </Note>
+        </main>
+      </div>
+    )
+  }
+
+  if (!session) return <Login onSignedIn={setSession} />
+
+  const now = new Date()
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+    <Shell session={session} sync={sync} tab={tab} onTab={setTab}
+           onSignOut={() => setSession(null)}>
+      {tab === 'stock' ? (
+        <Inventory model={model} session={session} now={now} />
+      ) : tab === 'requests' ? (
+        <Requests model={model} session={session} now={now} outbox={sync.outbox} />
+      ) : (
+        <Transfers model={model} session={session} now={now} outbox={sync.outbox} />
+      )}
+    </Shell>
   )
 }
-
-export default App

@@ -28,6 +28,7 @@ const RPC_FOR: Record<OpName, string> = {
   create_batch: 'create_batch',
   create_request: 'create_request',
   propose_transfer: 'propose_transfer',
+  claim_from_match: 'claim_from_match',
   accept_transfer: 'accept_transfer',
   decline_transfer: 'decline_transfer',
   cancel_transfer: 'cancel_transfer',

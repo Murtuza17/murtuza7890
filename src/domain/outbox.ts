@@ -29,6 +29,7 @@ export type OpName =
   | 'create_batch'
   | 'create_request'
   | 'propose_transfer'
+  | 'claim_from_match'
   | 'accept_transfer'
   | 'decline_transfer'
   | 'cancel_transfer'
@@ -42,6 +43,7 @@ export type OpName =
  * "Claimed" and a worker seeing the truth, so it is data, not scattered ifs.
  */
 export const CONTESTED: ReadonlySet<OpName> = new Set<OpName>([
+  'claim_from_match',
   'accept_transfer',
   'dispatch_transfer',
   'confirm_handoff',
@@ -88,6 +90,11 @@ const PERMANENT_ERRORS: ReadonlySet<string> = new Set([
   'not_your_side',
   'not_found',
   'bad_side',
+  'own_stock',
+  'bad_qty',
+  'not_your_batch',
+  'would_go_negative',
+  'reserved_stock',
   'session_invalid',
 ])
 
