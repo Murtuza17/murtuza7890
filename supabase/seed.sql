@@ -177,3 +177,74 @@ insert into events (entity_type, entity_id, type, actor_clinic_id, payload)
 select 'batch', b.id, 'batch_created', b.clinic_id,
        jsonb_build_object('note', 'Seeded contested batch for the double-claim demo')
 from batches b where b.batch_no = 'ASV-1204';
+
+-- ---------------------------------------------------------------------------
+-- CONSUMPTION HISTORY — so the forecast has something real to reason about.
+--
+-- Without a few months of dispensing, every outlook honestly reads "not enough
+-- history yet", which is correct but demonstrates nothing. This seeds the exact
+-- district situation the product exists for:
+--
+--   Jadcherla  holds 60 FMD vials expiring in 27 days and barely uses FMD
+--              -> almost all of it is heading for the bin
+--   Balanagar  gets through roughly a vial a day and has already run out
+--              -> animals waiting, no stock, no request posted
+--
+-- They are 13 km apart and neither clinic knows about the other. That is the
+-- pairing src/domain/anticipate.ts is built to spot without anyone asking.
+-- ---------------------------------------------------------------------------
+
+-- Widen the observation window on Jadcherla's FMD so the rate is trustworthy
+-- rather than a fortnight of noise.
+update stock_movements m
+set server_ts = now() - interval '92 days',
+    client_ts = now() - interval '92 days'
+from batches b
+where b.id = m.batch_id
+  and b.batch_no = 'FMD-2411-C'
+  and m.reason = 'received';
+
+-- Jadcherla: 6 vials in three months. Nowhere near enough to finish 60.
+do $$
+declare v_batch uuid; v_clinic uuid; i int;
+begin
+  select b.id, b.clinic_id into v_batch, v_clinic
+  from batches b where b.batch_no = 'FMD-2411-C';
+
+  for i in 1..3 loop
+    insert into stock_movements (batch_id, delta, reason, actor_clinic_id,
+                                 client_id, client_ts, server_ts)
+    values (v_batch, -2, 'dispensed', v_clinic, gen_random_uuid(),
+            now() - (i * interval '26 days'), now() - (i * interval '26 days'));
+  end loop;
+end $$;
+
+-- Balanagar: a batch they received three months ago and worked steadily through
+-- until it ran out. The shelf is empty; the demand is not.
+do $$
+declare v_batch uuid; v_clinic uuid; i int;
+begin
+  select id into v_clinic from clinics where code = 'BLNG';
+
+  insert into batches (clinic_id, drug_id, batch_no, expiry_date, cold_chain_ok, status)
+  select v_clinic, d.id, 'FMD-2350-OLD', current_date + 40, true, 'active'
+  from drugs d where d.name = 'Foot & Mouth Disease vaccine'
+  returning id into v_batch;
+
+  insert into stock_movements (batch_id, delta, reason, actor_clinic_id,
+                               client_id, client_ts, server_ts)
+  values (v_batch, 90, 'received', v_clinic, gen_random_uuid(),
+          now() - interval '92 days', now() - interval '92 days');
+
+  -- ~0.9 vials/day, dispensed in the weekly bursts a real dispensary works
+  -- in. 12 x 7 = 84 of 90, leaving 6 — nearly out, which is both realistic
+  -- and the state worth forecasting. (13 bursts would overdraw the batch to
+  -- -1: the ledger permits it arithmetically, but negative stock on a shelf
+  -- is a seeding error, not a scenario.)
+  for i in 1..12 loop
+    insert into stock_movements (batch_id, delta, reason, actor_clinic_id,
+                                 client_id, client_ts, server_ts)
+    values (v_batch, -7, 'dispensed', v_clinic, gen_random_uuid(),
+            now() - (i * interval '7 days'), now() - (i * interval '7 days'));
+  end loop;
+end $$;

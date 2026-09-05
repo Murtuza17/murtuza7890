@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { findMatches, formatKm, planFulfilment, type Match } from '../domain/matching'
+import { anticipateTransfers, bestPerNeed, type AnticipatedTransfer } from '../domain/anticipate'
 import { humanizeExpiry } from '../domain/expiry'
 import { enqueue } from '../data/sync'
+import { parseRequestText } from '../data/intake'
 import type { OutboxItem } from '../domain/outbox'
 import type { StockRequest } from '../domain/types'
 import type { Session } from '../data/session'
@@ -30,11 +32,38 @@ export function Requests({
 
   const request = open ? model.requests.find((r) => r.id === open) : undefined
 
+  // Suggestions nobody asked for: a forecast of waste here paired against a
+  // forecast of stockout there. This is the only part of the board that acts
+  // before a human has noticed anything.
+  const suggestions = bestPerNeed(anticipateTransfers({
+    positions: model.positions,
+    clinicsById: model.clinicsById,
+    drugsById: model.drugsById,
+    radiusKm: 40,
+    now,
+  })).filter((s) => s.fromClinicId === session.clinic.id || s.toClinicId === session.clinic.id)
+
   return (
     <>
       <button className="btn" onClick={() => setPosting(true)} style={{ marginTop: 0 }}>
         Ask for medicine
       </button>
+
+      {suggestions.length > 0 ? (
+        <>
+          <div className="section-title">
+            Worth doing now · predicted from your own usage
+          </div>
+          {suggestions.map((s) => (
+            <SuggestionCard
+              key={`${s.batchId}:${s.toClinicId}`}
+              suggestion={s}
+              outgoing={s.fromClinicId === session.clinic.id}
+              model={model}
+            />
+          ))}
+        </>
+      ) : null}
 
       <div className="section-title">Your requests</div>
       {mine.length === 0 ? (
@@ -67,6 +96,55 @@ export function Requests({
         <PostSheet model={model} onClose={() => setPosting(false)} />
       ) : null}
     </>
+  )
+}
+
+/**
+ * A transfer the board worked out on its own.
+ *
+ * Everything about how this reads is deliberate. It leads with the action in
+ * plain language, states the forecast it rests on in the next line so a worker
+ * can disagree with the reasoning rather than just the conclusion, and marks
+ * itself a prediction — never a fact. A forecast dressed up as a certainty is
+ * how someone ends up riding 30 km on a guess.
+ */
+function SuggestionCard({
+  suggestion, outgoing, model,
+}: { suggestion: AnticipatedTransfer; outgoing: boolean; model: BoardModel }) {
+  const unit = model.drugsById.get(suggestion.drugId)?.unit ?? 'vial'
+  return (
+    <div className="card left-rule band-soon">
+      <div className="card-title">
+        {outgoing
+          ? `Send ${suggestion.qty} ${unit}s to ${suggestion.toVillage}`
+          : `Ask ${suggestion.fromClinicName} for ${suggestion.qty} ${unit}s`}
+      </div>
+      <div className="card-sub">{suggestion.drugName} · batch {suggestion.batchNo}</div>
+
+      {/* The reasoning, not a score. */}
+      <div className="card-meta" style={{ fontWeight: 600, color: 'var(--ink)' }}>
+        {suggestion.why}
+      </div>
+
+      <div className="flag">
+        <span aria-hidden="true">◔</span>
+        Predicted from usage so far, not a certainty
+        {suggestion.confidence === 'low' ? ' — based on limited history' : ''}
+      </div>
+
+      {suggestion.needsColdBox ? (
+        <div className="flag">
+          <span aria-hidden="true">❄</span>
+          Send a cold box — {formatKm(suggestion.distanceKm)} is too far unrefrigerated
+        </div>
+      ) : null}
+
+      <div className="card-meta">
+        {outgoing
+          ? `Post this as an offer, or call ${model.clinicsById.get(suggestion.toClinicId)?.phone ?? 'them'}.`
+          : `Ask them on the Requests tab, or call ${model.clinicsById.get(suggestion.fromClinicId)?.phone ?? 'them'}.`}
+      </div>
+    </div>
   )
 }
 
@@ -276,11 +354,81 @@ function PostSheet({ model, onClose }: { model: BoardModel; onClose: () => void 
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
 
+  // Natural-language intake. Everything below it is the form it fills in, which
+  // stays fully usable on its own — offline, unconfigured, or when the parse
+  // simply fails. See src/data/intake.ts.
+  const [sentence, setSentence] = useState('')
+  const [parsing, setParsing] = useState(false)
+  const [intakeNote, setIntakeNote] = useState<
+    { kind: 'error' | 'warn' | 'info'; text: string } | null
+  >(null)
+
   const n = Number(qty)
   const valid = drugId !== '' && Number.isInteger(n) && n > 0
 
+  async function parseSentence() {
+    setParsing(true)
+    setIntakeNote(null)
+    const outcome = await parseRequestText(sentence, model.drugs)
+    setParsing(false)
+
+    if (outcome.kind === 'unavailable') {
+      setIntakeNote({ kind: 'error', text: outcome.message })
+      return
+    }
+    if (!outcome.result.ok) {
+      const guess = outcome.result.drugNameGuess
+      setIntakeNote({
+        kind: 'error',
+        text: outcome.result.reason === 'no_drug_match'
+          ? guess
+            ? `Not sure which medicine “${guess}” is — pick it below.`
+            : 'Could not tell which medicine — pick it below.'
+          : 'Could not tell how many — fill it in below.',
+      })
+      return
+    }
+
+    // A DRAFT, never a submission. The fields fill in and the worker checks
+    // them — the same discipline as never showing a claim as confirmed before
+    // the server has said so.
+    const f = outcome.result.fields
+    setDrugId(f.drugId)
+    setQty(String(f.qtyNeeded))
+    setUrgency(f.urgency)
+    setRadius(String(f.radiusKm))
+    setDays(String(f.neededByDays))
+    setNote(f.note)
+    setIntakeNote({
+      kind: outcome.result.warnings.length > 0 ? 'warn' : 'info',
+      text: outcome.result.warnings[0] ?? 'Filled in below — check it, then post.',
+    })
+  }
+
   return (
     <Sheet title="Ask for medicine" onClose={onClose}>
+      <div className="field">
+        <label htmlFor="say">
+          Say what you need <span className="hint">English or Telugu · optional</span>
+        </label>
+        <input
+          id="say" className="input" value={sentence}
+          placeholder="20 vials FMD vaccine, two herds down at Peddapur"
+          onChange={(e) => setSentence(e.target.value)}
+        />
+        <button
+          className="btn btn-quiet" disabled={parsing || sentence.trim() === ''}
+          onClick={() => void parseSentence()}
+        >
+          {parsing ? 'Reading…' : 'Fill this in for me'}
+        </button>
+        {intakeNote ? (
+          <Note kind={intakeNote.kind === 'error' ? 'error' : intakeNote.kind === 'warn' ? 'warn' : 'info'}>
+            {intakeNote.text}
+          </Note>
+        ) : null}
+      </div>
+
       <div className="field">
         <label htmlFor="drug">Which medicine?</label>
         {/* A controlled list, never free text: "FMD vaccine" and "Foot & Mouth

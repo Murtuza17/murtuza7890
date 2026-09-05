@@ -10,6 +10,8 @@ import { useEffect, useMemo, useState } from 'react'
 import type {
   Batch, Clinic, DomainEvent, Drug, StockMovement, StockRequest, Transfer,
 } from '../domain/types'
+import { demandSignal, type DemandSignal } from '../domain/forecast'
+import type { ClinicDrugPosition } from '../domain/anticipate'
 import { getState, subscribe, type SyncState } from '../data/sync'
 import type { Board } from '../data/supabase'
 
@@ -33,6 +35,10 @@ export interface BoardModel {
   requests: StockRequest[]
   transfers: Transfer[]
   eventsByEntity: Map<string, DomainEvent[]>
+  /** Consumption rate per clinic+drug, keyed `clinicId:drugId`. */
+  signalByClinicDrug: Map<string, DemandSignal>
+  /** What each clinic holds and how fast it moves — input to anticipate(). */
+  positions: ClinicDrugPosition[]
 }
 
 const EMPTY: BoardModel = {
@@ -40,6 +46,7 @@ const EMPTY: BoardModel = {
   batches: [], batchesById: new Map(), availableByBatch: new Map(),
   onHandByBatch: new Map(), movements: [], movementsByBatch: new Map(),
   requests: [], transfers: [], eventsByEntity: new Map(),
+  signalByClinicDrug: new Map(), positions: [],
 }
 
 type Row = Record<string, unknown>
@@ -125,12 +132,64 @@ export function toModel(board: Board | null): BoardModel {
   const availableByBatch = new Map(board.stock.map((r) => [r.batch_id, r.available]))
   const onHandByBatch = new Map(board.stock.map((r) => [r.batch_id, r.on_hand]))
 
+  // Demand signals, then the positions anticipate() pairs off against each
+  // other. Aggregates come from the server view (clinic_drug_consumption), not
+  // from the capped movement list — see that view's comment for why.
+  const signalByClinicDrug = new Map<string, DemandSignal>()
+  for (const r of board.consumption as Row[]) {
+    const key = `${str(r, 'clinic_id')}:${str(r, 'drug_id')}`
+    signalByClinicDrug.set(key, demandSignal({
+      dispensed14d: num(r, 'dispensed_14d'),
+      dispensed30d: num(r, 'dispensed_30d'),
+      dispensed90d: num(r, 'dispensed_90d'),
+      events: num(r, 'events'),
+      observedDays: num(r, 'observed_days'),
+    }))
+  }
+
+  const positionMap = new Map<string, ClinicDrugPosition>()
+  for (const b of batches) {
+    const key = `${b.clinicId}:${b.drugId}`
+    const available = availableByBatch.get(b.id) ?? 0
+    const existing = positionMap.get(key)
+    const entry = {
+      id: b.id, batchNo: b.batchNo, expiryDate: b.expiryDate,
+      coldChainOk: b.coldChainOk, status: b.status, available,
+    }
+    if (existing) {
+      positionMap.set(key, {
+        ...existing,
+        onHand: existing.onHand + available,
+        batches: [...existing.batches, entry],
+      })
+    } else {
+      positionMap.set(key, {
+        clinicId: b.clinicId, drugId: b.drugId, onHand: available,
+        signal: signalByClinicDrug.get(key) ?? demandSignal({
+          dispensed14d: 0, dispensed30d: 0, dispensed90d: 0, events: 0, observedDays: 0,
+        }),
+        batches: [entry],
+      })
+    }
+  }
+
+  // A clinic that has run out entirely holds no batch, so it would be invisible
+  // here — yet it is exactly the clinic most worth resupplying. Add a
+  // zero-stock position wherever there is demand history but nothing left.
+  for (const [key, signal] of signalByClinicDrug) {
+    if (positionMap.has(key)) continue
+    const [clinicId, drugId] = key.split(':')
+    if (!clinicId || !drugId) continue
+    positionMap.set(key, { clinicId, drugId, onHand: 0, signal, batches: [] })
+  }
+
   return {
     clinics, clinicsById: new Map(clinics.map((c) => [c.id, c])),
     drugs, drugsById: new Map(drugs.map((d) => [d.id, d])),
     batches, batchesById: new Map(batches.map((b) => [b.id, b])),
     availableByBatch, onHandByBatch,
     movements, movementsByBatch, requests, transfers, eventsByEntity,
+    signalByClinicDrug, positions: [...positionMap.values()],
   }
 }
 

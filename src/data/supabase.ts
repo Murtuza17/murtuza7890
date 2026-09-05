@@ -113,7 +113,8 @@ export async function fetchBoard() {
     /* ignored deliberately */
   }
 
-  const [clinics, drugs, stock, requests, transfers, movements, events] = await Promise.all([
+  const [clinics, drugs, stock, requests, transfers, movements, events, consumption] =
+    await Promise.all([
     select<Row>('clinics_public', '&order=name'),
     select<Row>('drugs', '&order=name'),
     select<BoardRow>('batch_stock'),
@@ -127,10 +128,13 @@ export async function fetchBoard() {
     // audit trail on a flaky link is a degraded view, losing the stock list is
     // a useless app. Everything above is load-bearing and stays in Promise.all.
     select<Row>('events', '&order=server_ts.desc&limit=300').catch(() => [] as Row[]),
+    // Demand aggregates for the forecast. Supplementary like events: losing
+    // them degrades to 'not enough history', which the UI already handles.
+    select<Row>('clinic_drug_consumption').catch(() => [] as Row[]),
   ])
 
   return {
-    clinics, drugs, stock, requests, transfers, movements, events,
+    clinics, drugs, stock, requests, transfers, movements, events, consumption,
     fetchedAt: new Date().toISOString(),
   }
 }

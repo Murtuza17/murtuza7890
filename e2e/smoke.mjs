@@ -260,6 +260,60 @@ console.log('== a correction can add stock back, not just remove it ==')
   await ctx.close()
 }
 
+console.log('')
+console.log('== the board proposes a transfer nobody asked for ==')
+{
+  // Jadcherla holds 48 FMD vials expiring in 27 days and barely uses FMD;
+  // Balanagar gets through ~1/day and is nearly out. No request exists for
+  // this — it is inferred from the two clinics' own dispensing history.
+  const { ctx, page } = await signIn('BLNG', '5678')
+  await page.click('.tab:has-text("Requests")')
+  await page.waitForTimeout(700)
+  const body = await page.locator('main').innerText()
+
+  ok(/WORTH DOING NOW/i.test(body), 'a predicted suggestion surfaces unprompted')
+  ok(/Ask Jadcherla .* for \d+ vials/i.test(body),
+     'it names the clinic and a concrete quantity', body.slice(0, 200))
+  ok(/is not using these/.test(body) && /runs out in \d+ days/.test(body),
+     'and states both halves of the forecast it rests on')
+  ok(/not a certainty/i.test(body),
+     'and marks itself a prediction rather than a fact')
+  await page.screenshot({ path: 'e2e/shot-suggestion.png' })
+  await ctx.close()
+}
+
+console.log('')
+console.log('== natural-language intake degrades to the form ==')
+{
+  // No ANTHROPIC_API_KEY and no /api route in the local shim, so the parse
+  // must fail — which is the important case. The form has to stay usable.
+  const { ctx, page } = await signIn('DVKD', '4567')
+  await page.click('.tab:has-text("Requests")')
+  await page.click('button:has-text("Ask for medicine")')
+  await page.waitForSelector('.sheet')
+
+  ok(await page.locator('#say').isVisible(), 'the one-sentence field is offered')
+
+  await page.fill('#say', '20 vials FMD vaccine, two herds down at Peddapur')
+  await page.click('button:has-text("Fill this in for me")')
+  await page.waitForTimeout(2000)
+
+  const sheet = await page.locator('.sheet').innerText()
+  ok(/fill the form in below|could not read/i.test(sheet),
+     'a failed parse says so and points at the form', sheet.slice(0, 200))
+  ok(await page.locator('#drug').isVisible() && await page.locator('#need').isVisible(),
+     'and the manual form is still fully there')
+
+  // Prove it still works by hand.
+  const options = await page.locator('#drug option').allInnerTexts()
+  const vaccine = options.find((o) => /vaccine|antivenom/i.test(o))
+  await page.selectOption('#drug', { label: vaccine })
+  await page.fill('#need', '12')
+  ok(await page.locator('.sheet button:has-text("Post this request")').isEnabled(),
+     'posting by hand is unaffected')
+  await ctx.close()
+}
+
 await browser.close()
 
 console.log('')

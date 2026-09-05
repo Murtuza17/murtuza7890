@@ -66,7 +66,8 @@ begin
          on public.clinics to %I', r);
       execute format('grant select on public.drugs, public.batches,
         public.stock_movements, public.requests, public.transfers, public.events to %I', r);
-      execute format('grant select on public.batch_stock, public.clinics_public to %I', r);
+      execute format('grant select on public.batch_stock, public.clinics_public,
+        public.clinic_drug_consumption to %I', r);
 
       -- Writes: functions only.
       execute format('grant execute on function
@@ -91,3 +92,4 @@ end $$;
 -- rather than the view silently bypassing them as its owner.
 alter view public.batch_stock     set (security_invoker = true);
 alter view public.clinics_public  set (security_invoker = true);
+alter view public.clinic_drug_consumption set (security_invoker = true);

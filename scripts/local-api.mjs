@@ -37,7 +37,7 @@ const IDENT = /^[a-z_][a-z0-9_]*$/
 
 const READABLE = new Set([
   'clinics_public', 'drugs', 'batch_stock', 'requests', 'transfers', 'stock_movements',
-  'events',
+  'events', 'clinic_drug_consumption',
 ])
 
 const CALLABLE = new Set([

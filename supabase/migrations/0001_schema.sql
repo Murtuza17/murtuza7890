@@ -236,3 +236,43 @@ group by b.id;
 create or replace view public.clinics_public as
 select id, code, name, village, district, lat, lng, phone, created_at
 from public.clinics;
+
+-- ---------------------------------------------------------------------------
+-- clinic_drug_consumption — the demand signal behind src/domain/forecast.ts
+--
+-- The ledger was already a complete time series of demand per clinic per drug
+-- and nothing read it. This aggregates it so the client can forecast waste and
+-- stockouts without shipping the whole movement history to a phone on 2G.
+--
+-- Aggregated HERE rather than client-side on purpose: the board's movement
+-- fetch is capped (500 rows across all clinics), and deriving a consumption
+-- rate from a truncated page would understate demand exactly for the busiest
+-- clinics — the ones the forecast matters most for. Same trap that was already
+-- fixed once in matching; not repeating it.
+--
+-- Only `dispensed` counts as demand. `wasted`/`expired` are the failure being
+-- prevented — counting them would make a clinic that bins stock look like one
+-- that needs more, and the system would keep feeding it. `transferred_out` is
+-- another clinic's demand. `correction` is bookkeeping. Dispense deltas are
+-- negative, so demand is -delta.
+-- ---------------------------------------------------------------------------
+create or replace view public.clinic_drug_consumption as
+select
+  b.clinic_id,
+  b.drug_id,
+  coalesce(sum(case when m.reason = 'dispensed'
+                     and m.server_ts > now() - interval '14 days'
+                    then -m.delta else 0 end), 0)::int as dispensed_14d,
+  coalesce(sum(case when m.reason = 'dispensed'
+                     and m.server_ts > now() - interval '30 days'
+                    then -m.delta else 0 end), 0)::int as dispensed_30d,
+  coalesce(sum(case when m.reason = 'dispensed'
+                     and m.server_ts > now() - interval '90 days'
+                    then -m.delta else 0 end), 0)::int as dispensed_90d,
+  count(*) filter (where m.reason = 'dispensed')::int  as events,
+  -- How long this clinic has held this drug at all — the honest denominator.
+  -- A clinic three days old must not have three days extrapolated to ninety.
+  greatest(0, extract(day from now() - min(m.server_ts)))::int as observed_days
+from public.batches b
+join public.stock_movements m on m.batch_id = b.id
+group by b.clinic_id, b.drug_id;
