@@ -176,9 +176,10 @@ makes about webfonts, with a bigger number.
    offered — but two sources of truth for one fact will eventually disagree.
    The same lazy sweep that expires reservations should age batches too.
 
-**Not cut after all:** the demo GIF (`docs/demo.gif`, in the README). The brief
-names it the first thing to drop under time pressure, and it was the right call
-to drop initially — but with the clock no longer binding, it earns its place:
-two of five judging criteria are about failure handling, and a recording of the
-real double-claim rejection and the real offline queue draining is more
-convincing at a glance than a paragraph asserting they work.
+**Not cut after all:** the demo GIF (`docs/demo.gif`, in the README), and
+**trilingual UI localization** (English, Telugu `తెలుగు`, Hindi `हिन्दी` via
+`src/domain/i18n.ts`). The brief's emphasis on low-digital-literacy field
+workers in rural Telangana made an English-only interface a glaring real-world
+gap; full trilingual switching and native voice dictation (`en-IN`, `te-IN`,
+`hi-IN`) are now live with zero external libraries or bundle bloat.
+
