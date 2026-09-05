@@ -76,6 +76,10 @@ begin
         public.cancel_transfer(uuid, uuid, uuid, text),
         public.dispatch_transfer(uuid, uuid, uuid, timestamptz),
         public.confirm_handoff(uuid, uuid, text, text, uuid, timestamptz),
+        public.log_movement(uuid, uuid, int, text, uuid, timestamptz),
+        public.create_batch(uuid, uuid, text, date, boolean, int, uuid, timestamptz),
+        public.create_request(uuid, uuid, int, text, int, date, text, uuid),
+        public.claim_from_match(uuid, uuid, int, uuid, uuid),
         public.sweep_expired_reservations()
         to %I', r);
 

@@ -578,3 +578,180 @@ begin
   values (p_client_id, 'confirm_handoff', v_result);
   return v_result;
 end $$;
+
+-- ---------------------------------------------------------------------------
+-- OWN-CLINIC WRITES — uncontested.
+--
+-- Nobody else can disagree about your own shelf, so these apply optimistically
+-- on the device and land whenever signal returns. They still come through an
+-- RPC so that idempotency and the audit trail are uniform across every write.
+-- ---------------------------------------------------------------------------
+create or replace function public.log_movement(
+  p_token uuid, p_batch_id uuid, p_delta int, p_reason text,
+  p_client_id uuid, p_client_ts timestamptz default null
+) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+declare
+  v_clinic uuid; v_on_hand int; v_reserved int; v_free int;
+  v_owner uuid; v_result jsonb; v_existing jsonb;
+begin
+  select result into v_existing from rpc_results where client_id = p_client_id;
+  if found then return v_existing; end if;
+
+  v_clinic := public._clinic_for_session(p_token);
+
+  if p_delta = 0 then return jsonb_build_object('ok', false, 'error', 'zero_delta'); end if;
+  if p_reason not in ('received','dispensed','wasted','expired','correction') then
+    return jsonb_build_object('ok', false, 'error', 'bad_reason');
+  end if;
+
+  select clinic_id into v_owner from batches where id = p_batch_id for update;
+  if v_owner is null then return jsonb_build_object('ok', false, 'error', 'not_found'); end if;
+  if v_owner <> v_clinic then
+    return jsonb_build_object('ok', false, 'error', 'not_your_batch');
+  end if;
+
+  select coalesce(sum(delta),0)::int into v_on_hand from stock_movements where batch_id = p_batch_id;
+  select qty_reserved into v_reserved from batches where id = p_batch_id;
+
+  if v_on_hand + p_delta < 0 then
+    return jsonb_build_object('ok', false, 'error', 'would_go_negative',
+                              'on_hand', v_on_hand, 'requested', abs(p_delta));
+  end if;
+
+  -- A correction is reconciling reality and may eat into reserved stock;
+  -- everything else must respect what has been promised to a neighbour.
+  if p_reason <> 'correction' and p_delta < 0 then
+    v_free := v_on_hand - v_reserved;
+    if abs(p_delta) > v_free then
+      return jsonb_build_object('ok', false, 'error', 'reserved_stock',
+                                'available', v_free, 'requested', abs(p_delta));
+    end if;
+  end if;
+
+  insert into stock_movements (batch_id, delta, reason, actor_clinic_id, client_id, client_ts)
+  values (p_batch_id, p_delta, p_reason, v_clinic, p_client_id, p_client_ts);
+
+  insert into events (entity_type, entity_id, type, actor_clinic_id, payload, client_ts)
+  values ('batch', p_batch_id, 'stock_moved', v_clinic,
+          jsonb_build_object('delta', p_delta, 'reason', p_reason), p_client_ts);
+
+  v_result := jsonb_build_object('ok', true, 'batch_id', p_batch_id,
+                                 'on_hand', v_on_hand + p_delta);
+  insert into rpc_results (client_id, operation, result)
+  values (p_client_id, 'log_movement', v_result);
+  return v_result;
+end $$;
+
+create or replace function public.create_batch(
+  p_token uuid, p_drug_id uuid, p_batch_no text, p_expiry_date date,
+  p_cold_chain_ok boolean, p_qty int, p_client_id uuid, p_client_ts timestamptz default null
+) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+declare v_clinic uuid; v_batch uuid; v_result jsonb; v_existing jsonb;
+begin
+  select result into v_existing from rpc_results where client_id = p_client_id;
+  if found then return v_existing; end if;
+
+  v_clinic := public._clinic_for_session(p_token);
+  if p_qty <= 0 then return jsonb_build_object('ok', false, 'error', 'bad_qty'); end if;
+
+  insert into batches (clinic_id, drug_id, batch_no, expiry_date, cold_chain_ok, status)
+  values (v_clinic, p_drug_id, p_batch_no, p_expiry_date, p_cold_chain_ok,
+          case when p_cold_chain_ok then 'active' else 'quarantined' end)
+  on conflict (clinic_id, drug_id, batch_no) do update set expiry_date = excluded.expiry_date
+  returning id into v_batch;
+
+  insert into stock_movements (batch_id, delta, reason, actor_clinic_id, client_id, client_ts)
+  values (v_batch, p_qty, 'received', v_clinic, p_client_id, p_client_ts);
+
+  insert into events (entity_type, entity_id, type, actor_clinic_id, payload, client_ts)
+  values ('batch', v_batch, 'batch_created', v_clinic,
+          jsonb_build_object('batch_no', p_batch_no, 'qty', p_qty), p_client_ts);
+
+  v_result := jsonb_build_object('ok', true, 'batch_id', v_batch);
+  insert into rpc_results (client_id, operation, result)
+  values (p_client_id, 'create_batch', v_result);
+  return v_result;
+end $$;
+
+create or replace function public.create_request(
+  p_token uuid, p_drug_id uuid, p_qty_needed int, p_urgency text,
+  p_radius_km int, p_needed_by date, p_note text, p_client_id uuid
+) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+declare v_clinic uuid; v_request uuid; v_result jsonb; v_existing jsonb;
+begin
+  select result into v_existing from rpc_results where client_id = p_client_id;
+  if found then return v_existing; end if;
+
+  v_clinic := public._clinic_for_session(p_token);
+  if p_urgency not in ('routine','urgent','outbreak') then
+    return jsonb_build_object('ok', false, 'error', 'bad_urgency');
+  end if;
+
+  insert into requests (clinic_id, drug_id, qty_needed, urgency, radius_km, needed_by, note,
+                        status, client_id)
+  values (v_clinic, p_drug_id, p_qty_needed, p_urgency, p_radius_km, p_needed_by,
+          coalesce(p_note,''), 'open', p_client_id)
+  returning id into v_request;
+
+  insert into events (entity_type, entity_id, type, actor_clinic_id, payload)
+  values ('request', v_request, 'request_opened', v_clinic,
+          jsonb_build_object('qty', p_qty_needed, 'urgency', p_urgency));
+
+  v_result := jsonb_build_object('ok', true, 'request_id', v_request);
+  insert into rpc_results (client_id, operation, result)
+  values (p_client_id, 'create_request', v_result);
+  return v_result;
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- CLAIM FROM A MATCH — the main path from the board.
+--
+-- Creating the offer and claiming it are one call rather than two: on a 2G link
+-- a second round trip is a second chance to lose the race, and the claim is the
+-- thing being arbitrated.
+--
+-- The holder still has the real consent point — nothing physically moves until
+-- they tap Dispatch. Claiming reserves and issues codes; it does not reach into
+-- another clinic's fridge.
+--
+-- Replay safety: transfers.client_id is UNIQUE, so a double-tap cannot create a
+-- second transfer. The conflicting insert falls through to the existing one and
+-- accept_transfer's own idempotency returns the first answer.
+-- ---------------------------------------------------------------------------
+create or replace function public.claim_from_match(
+  p_token uuid, p_batch_id uuid, p_qty int, p_request_id uuid, p_client_id uuid
+) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+declare v_clinic uuid; v_holder uuid; v_transfer uuid; v_existing jsonb;
+begin
+  select result into v_existing from rpc_results where client_id = p_client_id;
+  if found then return v_existing; end if;
+
+  v_clinic := public._clinic_for_session(p_token);
+
+  select clinic_id into v_holder from batches where id = p_batch_id;
+  if v_holder is null then return jsonb_build_object('ok', false, 'error', 'not_found'); end if;
+  if v_holder = v_clinic then
+    return jsonb_build_object('ok', false, 'error', 'own_stock');
+  end if;
+  if p_qty <= 0 then return jsonb_build_object('ok', false, 'error', 'bad_qty'); end if;
+
+  insert into transfers (request_id, batch_id, from_clinic_id, to_clinic_id, qty, status, client_id)
+  values (p_request_id, p_batch_id, v_holder, v_clinic, p_qty, 'proposed', p_client_id)
+  on conflict (client_id) do nothing
+  returning id into v_transfer;
+
+  if v_transfer is null then
+    select id into v_transfer from transfers where client_id = p_client_id;
+  end if;
+
+  -- A distinct idempotency key: this call's own key already guards the insert.
+  return public.accept_transfer(p_token, v_transfer, gen_random_uuid());
+end $$;

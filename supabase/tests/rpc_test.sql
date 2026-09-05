@@ -323,3 +323,89 @@ end $$;
 
 \echo ''
 \echo 'all server-side tests passed'
+
+-- ---------------------------------------------------------------------------
+\echo '== own-clinic writes =='
+-- ---------------------------------------------------------------------------
+do $$
+declare v_tok uuid; v_batch uuid; r jsonb; v_before int; v_after int;
+begin
+  v_tok := _token('MBNR','1234');
+  v_batch := _batch('OXY-7741');
+  select on_hand into v_before from batch_stock where batch_id = v_batch;
+
+  r := log_movement(v_tok, v_batch, -7, 'dispensed', gen_random_uuid(), now());
+  perform _assert((r->>'ok')::boolean, 'a clinic can dispense from its own shelf');
+
+  select on_hand into v_after from batch_stock where batch_id = v_batch;
+  perform _assert(v_after = v_before - 7, 'the ledger moved by exactly the delta');
+
+  r := log_movement(v_tok, v_batch, -99999, 'dispensed', gen_random_uuid(), now());
+  perform _assert(r->>'error' = 'would_go_negative', 'cannot dispense vials that are not there');
+
+  r := log_movement(v_tok, _batch('ASV-1204'), -1, 'dispensed', gen_random_uuid(), now());
+  perform _assert(r->>'error' = 'not_your_batch', 'cannot move another clinic''s stock');
+end $$;
+
+do $$
+declare v_tok uuid; v_batch uuid; v_client uuid := gen_random_uuid(); r1 jsonb; r2 jsonb; v_rows int;
+begin
+  -- The offline queue replaying a dispense on a flaky link.
+  v_tok := _token('MBNR','1234');
+  v_batch := _batch('IVM-3320');
+  r1 := log_movement(v_tok, v_batch, -3, 'dispensed', v_client, now());
+  r2 := log_movement(v_tok, v_batch, -3, 'dispensed', v_client, now());
+  perform _assert(r1 = r2, 'a replayed dispense returns the same answer');
+  select count(*) into v_rows from stock_movements where client_id = v_client;
+  perform _assert(v_rows = 1, 'and writes one ledger row, not two');
+end $$;
+
+do $$
+declare v_tok uuid; v_batch uuid; v_free int; r jsonb;
+begin
+  -- Vials promised to a neighbour are not yours to dispense.
+  v_tok := _token('ADKL','2345');
+  v_batch := _batch('BQ-5510');
+  select available into v_free from batch_stock where batch_id = v_batch;
+  update batches set qty_reserved = (select on_hand from batch_stock where batch_id = v_batch)
+   where id = v_batch;
+
+  r := log_movement(v_tok, v_batch, -1, 'dispensed', gen_random_uuid(), now());
+  perform _assert(r->>'error' = 'reserved_stock', 'cannot dispense stock promised to a neighbour');
+
+  r := log_movement(v_tok, v_batch, -1, 'correction', gen_random_uuid(), now());
+  perform _assert((r->>'ok')::boolean, 'but a correction may reconcile reality against it');
+  update batches set qty_reserved = 0 where id = v_batch;
+end $$;
+
+-- ---------------------------------------------------------------------------
+\echo '== claim from a match =='
+-- ---------------------------------------------------------------------------
+do $$
+declare v_tok uuid; v_batch uuid; v_client uuid := gen_random_uuid(); r1 jsonb; r2 jsonb; v_count int;
+begin
+  v_tok := _token('MBNR','1234');
+  v_batch := _batch('FMD-2388-E');       -- Midjil, 16 vials
+  r1 := claim_from_match(v_tok, v_batch, 6, null, v_client);
+  perform _assert((r1->>'ok')::boolean, 'claiming a match creates and accepts in one call');
+  perform _assert(r1->>'sender_code' is not null, 'and issues both codes immediately');
+
+  -- A double-tap on a bad connection.
+  r2 := claim_from_match(v_tok, v_batch, 6, null, v_client);
+  select count(*) into v_count from transfers where client_id = v_client;
+  perform _assert(v_count = 1, 'a double-tapped claim creates one transfer, not two');
+  perform _assert(r1->>'sender_code' = r2->>'sender_code', 'and returns the same codes');
+
+  perform _assert(
+    (select qty_reserved from batches where id = v_batch) = 6,
+    'exactly 6 vials are reserved'
+  );
+end $$;
+
+do $$
+declare v_tok uuid; r jsonb;
+begin
+  v_tok := _token('MDJL','6789');
+  r := claim_from_match(v_tok, _batch('FMD-2388-E'), 1, null, gen_random_uuid());
+  perform _assert(r->>'error' = 'own_stock', 'a clinic cannot claim from itself');
+end $$;
