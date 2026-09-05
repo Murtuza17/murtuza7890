@@ -60,6 +60,8 @@ export function Requests({
               suggestion={s}
               outgoing={s.fromClinicId === session.clinic.id}
               model={model}
+              outbox={outbox}
+              now={now}
             />
           ))}
         </>
@@ -109,9 +111,43 @@ export function Requests({
  * how someone ends up riding 30 km on a guess.
  */
 function SuggestionCard({
-  suggestion, outgoing, model,
-}: { suggestion: AnticipatedTransfer; outgoing: boolean; model: BoardModel }) {
+  suggestion, outgoing, model, outbox, now,
+}: {
+  suggestion: AnticipatedTransfer; outgoing: boolean; model: BoardModel
+  outbox: readonly OutboxItem[]; now: Date
+}) {
+  const [busy, setBusy] = useState(false)
   const unit = model.drugsById.get(suggestion.drugId)?.unit ?? 'vial'
+
+  // Check if a request was already queued from this suggestion (by matching
+  // drug + qty — good enough to dedupe within a session).
+  const queued = outbox.find(
+    (i) =>
+      i.op === 'create_request' &&
+      i.args['p_drug_id'] === suggestion.drugId &&
+      i.args['p_qty_needed'] === suggestion.qty &&
+      (i.args as Record<string, unknown>)['_from_suggestion'] === suggestion.batchId,
+  )
+
+  async function askForThis() {
+    setBusy(true)
+    const neededBy = new Date(now.getTime() + 7 * 86_400_000)
+    await enqueue('create_request', {
+      p_drug_id: suggestion.drugId,
+      p_qty_needed: suggestion.qty,
+      p_urgency: 'urgent',
+      p_radius_km: Math.ceil(suggestion.distanceKm + 5),
+      p_needed_by: neededBy.toISOString().slice(0, 10),
+      p_note: `Suggested: ${suggestion.fromClinicName} has ${suggestion.qty} ${unit}s expiring soon`,
+      _from_suggestion: suggestion.batchId,
+    })
+    setBusy(false)
+  }
+
+  const otherClinic = outgoing
+    ? model.clinicsById.get(suggestion.toClinicId)
+    : model.clinicsById.get(suggestion.fromClinicId)
+
   return (
     <div className="card left-rule band-soon">
       <div className="card-title">
@@ -139,14 +175,29 @@ function SuggestionCard({
         </div>
       ) : null}
 
-      <div className="card-meta">
-        {outgoing
-          ? `Post this as an offer, or call ${model.clinicsById.get(suggestion.toClinicId)?.phone ?? 'them'}.`
-          : `Ask them on the Requests tab, or call ${model.clinicsById.get(suggestion.fromClinicId)?.phone ?? 'them'}.`}
-      </div>
+      {/* Action buttons — the whole point of this change. */}
+      {!outgoing ? (
+        queued && queued.status === 'done' ? (
+          <Note kind="info">Request posted. See it above under "Your requests."</Note>
+        ) : queued && queued.status === 'rejected' ? (
+          <Note kind="error">{queued.lastError}</Note>
+        ) : queued ? (
+          <Note kind="warn">Waiting to send — not posted yet.</Note>
+        ) : (
+          <button className="btn" disabled={busy} onClick={() => void askForThis()}>
+            {busy ? 'Posting…' : `Ask for ${suggestion.qty} ${unit}s`}
+          </button>
+        )
+      ) : (
+        <div className="card-meta">
+          <strong>Call {otherClinic?.name ?? 'them'}</strong>
+          {otherClinic?.phone ? ` at ${otherClinic.phone}` : ''} to arrange this.
+        </div>
+      )}
     </div>
   )
 }
+
 
 function RequestCard({
   request, model, mine, onOpen,
