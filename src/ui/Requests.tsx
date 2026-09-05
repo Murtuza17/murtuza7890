@@ -43,8 +43,50 @@ export function Requests({
     now,
   })).filter((s) => s.fromClinicId === session.clinic.id || s.toClinicId === session.clinic.id)
 
+  // Real-world outbreak detection: surface any clinic whose 14-day consumption
+  // is surging at 2x+ baseline so nearby staff can prepare before shortages hit.
+  const surges = model.positions.filter(
+    (p) => p.signal.trend === 'surging' && p.signal.confidence !== 'none',
+  )
+
   return (
     <>
+      {surges.length > 0 ? (
+        <div className="card left-rule band-expired" style={{ marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span className="pill band-expired" style={{ padding: '2px 8px' }}>
+              <span className="pill-icon" aria-hidden="true">!!</span>Outbreak Alert
+            </span>
+            <span style={{ fontSize: 13, color: 'var(--ink-soft)' }}>
+              Usage surge detected in district
+            </span>
+          </div>
+          {surges.map((s) => {
+            const clinic = model.clinicsById.get(s.clinicId)
+            const drug = model.drugsById.get(s.drugId)
+            const unit = drug?.unit ?? 'vial'
+            const rate7d = Math.round(s.signal.recentRate * 7 * 10) / 10
+            const baseline7d = Math.round(s.signal.dailyRate * 7 * 10) / 10
+            const ratio = baseline7d > 0 ? Math.round((rate7d / baseline7d) * 10) / 10 : 2
+            const isMine = s.clinicId === session.clinic.id
+
+            return (
+              <div key={`${s.clinicId}:${s.drugId}`} style={{ marginTop: 8 }}>
+                <div style={{ fontWeight: 650, fontSize: 14.5 }}>
+                  {isMine ? 'Your clinic' : clinic?.name ?? clinic?.village} is using {drug?.name} at {ratio}× normal rate
+                </div>
+                <div className="card-meta">
+                  Using ~{rate7d} {unit}s/week over last 14 days (baseline: ~{baseline7d} {unit}s/week).
+                  {isMine
+                    ? ' Consider posting an urgent shortage request below.'
+                    : ` Expect emergency requests from ${clinic?.village ?? 'this village'}.`}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ) : null}
+
       <button className="btn" onClick={() => setPosting(true)} style={{ marginTop: 0 }}>
         Ask for medicine
       </button>
