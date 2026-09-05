@@ -7,7 +7,9 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import type { Batch, Clinic, Drug, StockMovement, StockRequest, Transfer } from '../domain/types'
+import type {
+  Batch, Clinic, DomainEvent, Drug, StockMovement, StockRequest, Transfer,
+} from '../domain/types'
 import { getState, subscribe, type SyncState } from '../data/sync'
 import type { Board } from '../data/supabase'
 
@@ -30,13 +32,14 @@ export interface BoardModel {
   movementsByBatch: Map<string, StockMovement[]>
   requests: StockRequest[]
   transfers: Transfer[]
+  eventsByEntity: Map<string, DomainEvent[]>
 }
 
 const EMPTY: BoardModel = {
   clinics: [], clinicsById: new Map(), drugs: [], drugsById: new Map(),
   batches: [], batchesById: new Map(), availableByBatch: new Map(),
   onHandByBatch: new Map(), movements: [], movementsByBatch: new Map(),
-  requests: [], transfers: [],
+  requests: [], transfers: [], eventsByEntity: new Map(),
 }
 
 type Row = Record<string, unknown>
@@ -92,6 +95,23 @@ export function toModel(board: Board | null): BoardModel {
     completedAt: nullable(r, 'completed_at'),
   }))
 
+  const events: DomainEvent[] = board.events.map((r: Row) => ({
+    id: str(r, 'id'),
+    entityType: str(r, 'entity_type') as DomainEvent['entityType'],
+    entityId: str(r, 'entity_id'), type: str(r, 'type') as DomainEvent['type'],
+    actorClinicId: nullable(r, 'actor_clinic_id'),
+    payload: (r['payload'] ?? {}) as Record<string, unknown>,
+    clientTs: nullable(r, 'client_ts'), serverTs: str(r, 'server_ts'),
+  }))
+
+  // Server time orders the trail. A device clock never does.
+  const eventsByEntity = new Map<string, DomainEvent[]>()
+  for (const e of [...events].sort((a, b) => a.serverTs.localeCompare(b.serverTs))) {
+    const list = eventsByEntity.get(e.entityId)
+    if (list) list.push(e)
+    else eventsByEntity.set(e.entityId, [e])
+  }
+
   const movementsByBatch = new Map<string, StockMovement[]>()
   for (const m of movements) {
     const list = movementsByBatch.get(m.batchId)
@@ -110,7 +130,7 @@ export function toModel(board: Board | null): BoardModel {
     drugs, drugsById: new Map(drugs.map((d) => [d.id, d])),
     batches, batchesById: new Map(batches.map((b) => [b.id, b])),
     availableByBatch, onHandByBatch,
-    movements, movementsByBatch, requests, transfers,
+    movements, movementsByBatch, requests, transfers, eventsByEntity,
   }
 }
 

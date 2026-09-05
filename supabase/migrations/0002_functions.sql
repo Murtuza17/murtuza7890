@@ -128,6 +128,9 @@ begin
     values ('transfer', v_t.id, 'transfer_expired', null,
             jsonb_build_object('reserved_until', v_t.reserved_until, 'qty', v_t.qty));
 
+    -- The shortage is unsolved again and must go back on the board.
+    perform public._recompute_request_status(v_t.request_id);
+
     v_released := v_released + 1;
   end loop;
   return v_released;
@@ -307,6 +310,8 @@ begin
   values ('transfer', p_transfer_id, 'transfer_accepted', v_clinic,
           jsonb_build_object('qty', v_transfer.qty, 'reserved_until', v_until));
 
+  perform public._recompute_request_status(v_transfer.request_id);
+
   v_result := jsonb_build_object(
     'ok', true, 'transfer_id', p_transfer_id,
     'sender_code', v_sender, 'receiver_code', v_receiver,
@@ -350,6 +355,8 @@ begin
   values ('transfer', p_transfer_id, 'transfer_declined', v_clinic,
           jsonb_build_object('note', p_note));
 
+  perform public._recompute_request_status(v_transfer.request_id);
+
   v_result := jsonb_build_object('ok', true, 'transfer_id', p_transfer_id, 'status', 'declined');
   insert into rpc_results (client_id, operation, result)
   values (p_client_id, 'decline_transfer', v_result);
@@ -391,6 +398,8 @@ begin
   insert into events (entity_type, entity_id, type, actor_clinic_id, payload)
   values ('transfer', p_transfer_id, 'transfer_cancelled', v_clinic,
           jsonb_build_object('note', p_note, 'qty_released', v_transfer.qty));
+
+  perform public._recompute_request_status(v_transfer.request_id);
 
   v_result := jsonb_build_object('ok', true, 'transfer_id', p_transfer_id, 'status', 'cancelled');
   insert into rpc_results (client_id, operation, result)
@@ -516,6 +525,8 @@ begin
     values ('transfer', p_transfer_id, 'transfer_disputed', v_clinic,
             jsonb_build_object('side', p_side, 'reported', p_code, 'expected', v_expected),
             p_client_ts);
+
+    perform public._recompute_request_status(v_transfer.request_id);
 
     v_result := jsonb_build_object(
       'ok', true, 'status', 'disputed',
@@ -754,4 +765,50 @@ begin
 
   -- A distinct idempotency key: this call's own key already guards the insert.
   return public.accept_transfer(p_token, v_transfer, gen_random_uuid());
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- REQUEST FILL STATE
+--
+-- `requests.status` has had open | partially_filled | filled since 0001, and the
+-- board filters on them, but nothing ever moved a request off 'open'. A
+-- shortage that had been fully claimed stayed on every clinic's board forever,
+-- so the district board silently filled with problems that were already solved
+-- and workers kept opening requests to find the stock long gone.
+--
+-- Derived, never stored as a counter — same reasoning as the ledger. Recomputed
+-- from the transfers themselves at every transition that could change it.
+--
+-- Lock order: this is always called LAST, after the batch and transfer locks are
+-- already held, so the order stays batch -> transfers -> request everywhere.
+-- ---------------------------------------------------------------------------
+create or replace function public._recompute_request_status(p_request_id uuid)
+returns text
+language plpgsql security definer set search_path = public, extensions
+as $$
+declare v_needed int; v_committed int; v_status text;
+begin
+  if p_request_id is null then return null; end if;
+
+  select qty_needed into v_needed from requests where id = p_request_id for update;
+  if v_needed is null then return null; end if;
+
+  -- Only live commitments count. A declined or expired transfer frees the
+  -- shortage to be solved again.
+  select coalesce(sum(qty), 0)::int into v_committed
+  from transfers
+  where request_id = p_request_id and status in ('accepted', 'in_transit', 'completed');
+
+  v_status := case
+    when v_committed <= 0        then 'open'
+    when v_committed < v_needed  then 'partially_filled'
+    else 'filled'
+  end;
+
+  -- A clinic that cancelled its own request has said the shortage is over;
+  -- transfer traffic must not drag it back onto the board.
+  update requests set status = v_status
+  where id = p_request_id and status not in ('cancelled', 'expired');
+
+  return v_status;
 end $$;

@@ -138,8 +138,19 @@ gzipped of a 125 KB bundle for `.rpc()` and one `select`. Dropping it took first
 load to 71.8 KB, roughly four seconds on 2G. That is the same argument the spec
 makes about webfonts, with a bigger number.
 
-**Known limit I would fix next:** `qty_reserved` is the one stored running total
-in the schema — exactly what the ledger exists to forbid. It is safe only because
-it is written in one place, inside the row lock. `reservedDrift()` states the
-invariant and the tests assert it, but a periodic reconciliation job would be
-better than a proof that holds only as long as everyone respects the rule.
+**Known limits I would fix next**, in order:
+
+1. `qty_reserved` is the one stored running total in the schema — exactly what
+   the ledger exists to forbid. It is safe only because it is written in one
+   place, inside the row lock. `reservedDrift()` states the invariant and the
+   tests assert it, but a periodic reconciliation job beats a proof that holds
+   only while everyone respects the rule.
+2. `batches.status` never ages. A batch that passes its expiry keeps
+   `status = 'active'` until someone touches it. Harmless today — matching
+   filters on the expiry *date*, not the column, so expired stock is never
+   offered — but two sources of truth for one fact will eventually disagree.
+   The same lazy sweep that expires reservations should age batches too.
+3. No demo GIF in the README. The brief names it as the first thing to cut, and
+   the offline toggle and the seeded contested batch make both failure modes
+   reproducible in about fifteen seconds each, which is the point the GIF was
+   there to serve.

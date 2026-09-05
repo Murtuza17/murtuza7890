@@ -22,11 +22,13 @@ API_PID=""; WEB_PID=""
 cleanup() {
   [ -n "$WEB_PID" ] && kill "$WEB_PID" 2>/dev/null || true
   [ -n "$API_PID" ] && kill "$API_PID" 2>/dev/null || true
+  pg_ctl -D "$PGDATA" stop -m fast >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
 echo "== database"
-./scripts/test-db.sh >/dev/null
+# Keep the server up: the shim, the browser and the re-seed all need it.
+KEEP_PG=1 ./scripts/test-db.sh >/dev/null
 echo "   migrations, seed and server tests green"
 
 # The RPC tests deliberately mutate data — they dispense stock and resolve the

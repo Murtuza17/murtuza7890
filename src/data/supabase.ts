@@ -113,17 +113,24 @@ export async function fetchBoard() {
     /* ignored deliberately */
   }
 
-  const [clinics, drugs, stock, requests, transfers, movements] = await Promise.all([
+  const [clinics, drugs, stock, requests, transfers, movements, events] = await Promise.all([
     select<Row>('clinics_public', '&order=name'),
     select<Row>('drugs', '&order=name'),
     select<BoardRow>('batch_stock'),
     select<Row>('requests', '&order=created_at.desc'),
     select<Row>('transfers', '&order=created_at.desc'),
     select<Row>('stock_movements', '&order=server_ts.desc&limit=500'),
+    // The trail a disputed handoff is judged on. Bounded: a field worker needs
+    // recent history, not the whole log, and this rides a 2G connection.
+    //
+    // Supplementary, so it must never be able to blank the board — losing the
+    // audit trail on a flaky link is a degraded view, losing the stock list is
+    // a useless app. Everything above is load-bearing and stays in Promise.all.
+    select<Row>('events', '&order=server_ts.desc&limit=300').catch(() => [] as Row[]),
   ])
 
   return {
-    clinics, drugs, stock, requests, transfers, movements,
+    clinics, drugs, stock, requests, transfers, movements, events,
     fetchedAt: new Date().toISOString(),
   }
 }

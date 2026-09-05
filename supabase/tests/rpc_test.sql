@@ -8,10 +8,12 @@
 -- Failure raises. Silence is success.
 -- ============================================================================
 
-create or replace function public._assert(p_cond boolean, p_what text)
+create or replace function public._assert(p_cond boolean, p_what text, p_detail text default null)
 returns void language plpgsql as $$
 begin
-  if not p_cond then raise exception 'FAILED: %', p_what; end if;
+  if not p_cond then
+    raise exception 'FAILED: %', p_what || coalesce(' — ' || p_detail, '');
+  end if;
   raise notice '  ok  %', p_what;
 end $$;
 
@@ -21,7 +23,18 @@ returns uuid language sql as $$
 $$;
 
 create or replace function public._batch(p_no text)
-returns uuid language sql as $$ select id from batches where batch_no = p_no; $$;
+returns uuid language sql as $$
+  select id from batches where batch_no = p_no order by created_at, id limit 1;
+$$;
+
+-- batch_no is unique per (clinic, drug), not globally: a completed handoff
+-- lands the same batch_no on the receiving clinic's shelf. Scope by clinic when
+-- a test needs to be sure which copy it means.
+create or replace function public._batch_at(p_code text, p_no text)
+returns uuid language sql as $$
+  select b.id from batches b join clinics c on c.id = b.clinic_id
+  where c.code = p_code and b.batch_no = p_no order by b.created_at, b.id limit 1;
+$$;
 
 -- ---------------------------------------------------------------------------
 \echo '== idempotent replay =='
@@ -134,7 +147,7 @@ declare
 begin
   -- The ordering bug this guards against: a lapsed reservation that has not been
   -- swept yet makes free stock look committed and rejects a legitimate claim.
-  v_batch := _batch('ASV-1199');  -- Balanagar, 9 vials
+  v_batch := _batch_at('BLNG', 'ASV-1199');  -- Balanagar, 9 vials
   insert into transfers (batch_id, from_clinic_id, to_clinic_id, qty, status, reserved_until,
                          accepted_at)
   select v_batch, b.clinic_id, (select id from clinics where code='DVKD'), 9, 'accepted',
@@ -408,4 +421,89 @@ begin
   v_tok := _token('MDJL','6789');
   r := claim_from_match(v_tok, _batch('FMD-2388-E'), 1, null, gen_random_uuid());
   perform _assert(r->>'error' = 'own_stock', 'a clinic cannot claim from itself');
+end $$;
+
+-- ---------------------------------------------------------------------------
+\echo '== request fill state =='
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_req uuid; v_tok uuid; v_batch uuid; v_t1 uuid; v_t2 uuid; v_status text;
+begin
+  -- Balanagar needs 12 FMD vials. Two neighbours each hold some.
+  select r.id into v_req from requests r join clinics c on c.id=r.clinic_id
+   join drugs d on d.id=r.drug_id
+   where c.code='BLNG' and d.name='Foot & Mouth Disease vaccine';
+
+  select status into v_status from requests where id = v_req;
+  perform _assert(v_status = 'open', 'a new shortage starts open');
+
+  v_tok := _token('BLNG','5678');
+
+  -- Claim 5 of the 12 needed.
+  v_batch := _batch_at('MBNR', 'FMD-2411-A');
+  insert into transfers (request_id, batch_id, from_clinic_id, to_clinic_id, qty, status)
+  select v_req, v_batch, b.clinic_id, (select id from clinics where code='BLNG'), 5, 'proposed'
+  from batches b where b.id = v_batch returning id into v_t1;
+  perform accept_transfer(v_tok, v_t1, gen_random_uuid());
+
+  select status into v_status from requests where id = v_req;
+  perform _assert(v_status = 'partially_filled', 'a part-filled shortage says so');
+
+  -- Claim the remaining 7 from a second clinic.
+  v_batch := _batch_at('DVKD', 'FMD-2402-D');
+  insert into transfers (request_id, batch_id, from_clinic_id, to_clinic_id, qty, status)
+  select v_req, v_batch, b.clinic_id, (select id from clinics where code='BLNG'), 7, 'proposed'
+  from batches b where b.id = v_batch returning id into v_t2;
+  perform accept_transfer(v_tok, v_t2, gen_random_uuid());
+
+  select status into v_status from requests where id = v_req;
+  perform _assert(v_status = 'filled',
+    'filled from two neighbours, so it leaves everyone else''s board');
+
+  -- Giving stock back must put the shortage back on the board.
+  perform cancel_transfer(v_tok, v_t2, gen_random_uuid(), 'bike broke down');
+  select status into v_status from requests where id = v_req;
+  perform _assert(v_status = 'partially_filled', 'cancelling reopens the unmet part');
+
+  perform cancel_transfer(v_tok, v_t1, gen_random_uuid(), '');
+  select status into v_status from requests where id = v_req;
+  perform _assert(v_status = 'open', 'cancelling everything reopens the shortage in full');
+end $$;
+
+do $$
+declare v_req uuid; v_tok uuid; v_batch uuid; v_t uuid; v_status text; r jsonb;
+begin
+  -- A lapsed reservation must also put the shortage back.
+  select r.id into v_req from requests r join clinics c on c.id=r.clinic_id
+   where c.code='MDJL' limit 1;
+  v_tok := _token('MDJL','6789');
+  v_batch := _batch_at('MBNR', 'ASV-1180');   -- 6 vials, untouched by other tests
+
+  insert into transfers (request_id, batch_id, from_clinic_id, to_clinic_id, qty, status)
+  select v_req, v_batch, b.clinic_id, (select id from clinics where code='MDJL'), 3, 'proposed'
+  from batches b where b.id = v_batch returning id into v_t;
+
+  r := accept_transfer(v_tok, v_t, gen_random_uuid());
+  perform _assert((r->>'ok')::boolean, 'the setup claim succeeds', r::text);
+
+  select status into v_status from requests where id = v_req;
+  perform _assert(v_status <> 'open', 'claimed, so off the board');
+
+  update transfers set reserved_until = now() - interval '1 minute' where id = v_t;
+  perform sweep_expired_reservations();
+
+  select status into v_status from requests where id = v_req;
+  perform _assert(v_status = 'open', 'the TTL sweep puts the unsolved shortage back');
+end $$;
+
+do $$
+declare v_req uuid; v_status text;
+begin
+  -- A clinic that cancels its own request has said the shortage is over.
+  select id into v_req from requests limit 1;
+  update requests set status = 'cancelled' where id = v_req;
+  perform _recompute_request_status(v_req);
+  select status into v_status from requests where id = v_req;
+  perform _assert(v_status = 'cancelled', 'transfer traffic cannot resurrect a cancelled request');
 end $$;

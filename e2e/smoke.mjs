@@ -211,6 +211,21 @@ console.log('== double-claim through the UI (judging criterion #2) ==')
   await a.ctx.close(); await b.ctx.close()
 }
 
+console.log('')
+console.log('== audit trail is read from the event log ==')
+{
+  const { ctx, page } = await signIn('BLNG', '5678')
+  await page.click('.tab:has-text("Transfers")')
+  await page.waitForTimeout(400)
+  await page.locator('.card').first().locator('button').click()
+  await page.waitForSelector('.sheet')
+  const trail = await page.locator('.sheet .trail').innerText()
+  ok(/Offered by/.test(trail), 'the trail starts with the offer', trail.slice(0, 100))
+  ok(!/not yet/.test(trail) || /Claimed|Refused|Left/.test(trail),
+     'and shows real logged events, not placeholder rows')
+  await ctx.close()
+}
+
 await browser.close()
 
 console.log('')

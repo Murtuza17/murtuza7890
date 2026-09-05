@@ -296,28 +296,58 @@ function TransferSheet({
   )
 }
 
-/** The record both clinics can point at when a handoff goes wrong. */
+/**
+ * The record both clinics point at when a handoff goes wrong.
+ *
+ * Read from the append-only `events` log rather than reconstructed from the
+ * transfer's own timestamps. That difference matters for a dispute: the log
+ * holds the things the row cannot — which clinic was refused and why, which
+ * side reported which code, when a reservation lapsed. Spec §4 asks for a
+ * dispute to be surfaced with the FULL trail, and a row that has been updated
+ * in place is not a trail.
+ *
+ * Nothing here is ever deleted, so shrinkage stays visible between parties who
+ * do not report to each other.
+ */
+const EVENT_TEXT: Record<string, (p: Record<string, unknown>) => string> = {
+  transfer_accepted: () => 'Claimed — stock reserved, codes issued',
+  transfer_declined: () => 'Declined',
+  transfer_dispatched: (p) => `Left the shelf${p['qty'] ? ` — ${String(p['qty'])} vials` : ''}`,
+  transfer_confirmed: (p) => `${p['side'] === 'sender' ? 'Sender' : 'Receiver'} confirmed the handover`,
+  transfer_completed: () => 'Both clinics confirmed — handed over',
+  transfer_disputed: (p) =>
+    p['reported']
+      ? `Codes did not match — ${String(p['side'])} read ${String(p['reported'])}, expected ${String(p['expected'])}`
+      : 'Codes did not match',
+  transfer_cancelled: () => 'Given back',
+  transfer_expired: () => 'Not collected in 24 hours — stock released',
+  claim_rejected: (p) => `Claim refused — ${String(p['message'] ?? 'stock already committed')}`,
+}
+
 function TransferTrail({ transfer, model }: { transfer: Transfer; model: BoardModel }) {
   const from = model.clinicsById.get(transfer.fromClinicId)
-  const to = model.clinicsById.get(transfer.toClinicId)
-
-  const steps: Array<[string, string | null]> = [
-    ['Offered by ' + (from?.village ?? 'holder'), transfer.createdAt],
-    ['Claimed by ' + (to?.village ?? 'clinic'), transfer.acceptedAt],
-    ['Left ' + (from?.village ?? 'the clinic'), transfer.dispatchedAt],
-    ['Handed over', transfer.completedAt],
-  ]
+  const events = model.eventsByEntity.get(transfer.id) ?? []
 
   return (
     <>
       <div className="section-title">What happened</div>
       <ul className="trail">
-        {steps.map(([label, at]) => (
-          <li key={label}>
-            <b>{label}</b>
-            {at ? ` — ${new Date(at).toLocaleString()}` : ' — not yet'}
-          </li>
-        ))}
+        <li>
+          <b>Offered by {from?.village ?? 'the holding clinic'}</b>
+          {` — ${new Date(transfer.createdAt).toLocaleString()}`}
+        </li>
+        {events.map((e) => {
+          const actor = e.actorClinicId ? model.clinicsById.get(e.actorClinicId) : undefined
+          const describe = EVENT_TEXT[e.type]
+          return (
+            <li key={e.id}>
+              <b>{describe ? describe(e.payload as Record<string, unknown>) : e.type}</b>
+              {actor ? ` · ${actor.village}` : ''}
+              {` — ${new Date(e.serverTs).toLocaleString()}`}
+            </li>
+          )
+        })}
+        {events.length === 0 ? <li>Nothing has happened yet.</li> : null}
       </ul>
     </>
   )

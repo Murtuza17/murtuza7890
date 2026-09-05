@@ -28,7 +28,6 @@ export type OpName =
   | 'log_movement'
   | 'create_batch'
   | 'create_request'
-  | 'propose_transfer'
   | 'claim_from_match'
   | 'accept_transfer'
   | 'decline_transfer'

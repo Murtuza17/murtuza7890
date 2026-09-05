@@ -28,10 +28,30 @@ export PATH="$PGBIN:$PATH"
 if ! pg_isready -q 2>/dev/null; then
   echo "== starting a throwaway postgres on port $PGPORT"
   rm -rf "$PGDATA"
-  initdb -D "$PGDATA" -U postgres --auth=trust >/dev/null
-  pg_ctl -D "$PGDATA" -o "-p $PGPORT -k $PGHOST -c listen_addresses=''" -l /tmp/vetswap-pg.log start >/dev/null
-  trap 'pg_ctl -D "$PGDATA" stop -m fast >/dev/null 2>&1 || true' EXIT
-  sleep 1
+
+  # Postgres refuses to run as root. In a container or CI image that often IS
+  # the current user, so drop to an unprivileged one rather than failing.
+  PG_RUNNER=""
+  if [ "$(id -u)" = "0" ]; then
+    PG_RUNNER=${PG_RUNNER_USER:-pgtest}
+    id "$PG_RUNNER" >/dev/null 2>&1 || useradd -m "$PG_RUNNER"
+    mkdir -p "$PGDATA"
+    chown -R "$PG_RUNNER" "$PGDATA" "$PGHOST" 2>/dev/null || true
+  fi
+
+  as_pg() {
+    if [ -n "$PG_RUNNER" ]; then su "$PG_RUNNER" -c "PATH=$PGBIN:\$PATH $*"
+    else sh -c "$*"; fi
+  }
+
+  as_pg "initdb -D $PGDATA -U postgres --auth=trust" >/dev/null
+  as_pg "pg_ctl -D $PGDATA -o '-p $PGPORT -k $PGHOST -c listen_addresses=' -l /tmp/vetswap-pg.log start" >/dev/null
+  # e2e.sh needs the server to outlive this script, so it sets KEEP_PG=1.
+  if [ "${KEEP_PG:-0}" != "1" ]; then
+    trap 'as_pg "pg_ctl -D $PGDATA stop -m fast" >/dev/null 2>&1 || true' EXIT
+  fi
+
+  for _ in $(seq 1 30); do pg_isready -q 2>/dev/null && break; sleep 0.3; done
 fi
 
 echo "== rebuilding $DB from migrations"
