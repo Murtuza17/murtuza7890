@@ -16,24 +16,33 @@ export function Inventory({
   model, session, now,
 }: { model: BoardModel; session: Session; now: Date }) {
   const [logging, setLogging] = useState<string | null>(null)
+  const [adding, setAdding] = useState(false)
 
   const mine = model.batches
     .filter((b) => b.clinicId === session.clinic.id)
     .sort((a, b) => a.expiryDate.localeCompare(b.expiryDate))
 
-  if (mine.length === 0) {
-    return (
-      <Empty title="No stock logged yet">
-        Add your first batch to let nearby dispensaries see what you can spare.
-      </Empty>
-    )
-  }
-
   const batch = logging ? model.batchesById.get(logging) : undefined
   const drug = batch ? model.drugsById.get(batch.drugId) : undefined
 
+  if (mine.length === 0) {
+    return (
+      <>
+        <Empty title="No stock logged yet">
+          Add your first batch so nearby dispensaries can see what you could spare.
+        </Empty>
+        <button className="btn" onClick={() => setAdding(true)}>Add a batch</button>
+        {adding ? <AddSheet model={model} onClose={() => setAdding(false)} /> : null}
+      </>
+    )
+  }
+
   return (
     <>
+      <button className="btn" style={{ marginTop: 0 }} onClick={() => setAdding(true)}>
+        Add a batch
+      </button>
+
       <div className="section-title">Your stock · {mine.length} batches</div>
 
       {mine.map((b) => {
@@ -77,6 +86,8 @@ export function Inventory({
           </div>
         )
       })}
+
+      {adding ? <AddSheet model={model} onClose={() => setAdding(false)} /> : null}
 
       {batch && drug ? (
         <LogSheet
@@ -158,6 +169,103 @@ function LogSheet({
         }}
       >
         {busy ? 'Saving…' : `Record ${qty || '0'} ${unit}s`}
+      </button>
+      <button className="btn btn-quiet" onClick={onClose}>Cancel</button>
+    </Sheet>
+  )
+}
+
+/**
+ * Must-build #1: log inventory with vial count, batch number, cold-storage
+ * status and expiry date.
+ *
+ * The medicine comes from the controlled catalogue, never free text — see
+ * supabase/migrations/0001_schema.sql for why that is a trust safeguard rather
+ * than a convenience.
+ */
+function AddSheet({ model, onClose }: { model: BoardModel; onClose: () => void }) {
+  const [drugId, setDrugId] = useState('')
+  const [batchNo, setBatchNo] = useState('')
+  const [qty, setQty] = useState('')
+  const [expiry, setExpiry] = useState('')
+  const [coldOk, setColdOk] = useState(true)
+  const [busy, setBusy] = useState(false)
+
+  const drug = model.drugsById.get(drugId)
+  const n = Number(qty)
+  const valid = drugId !== '' && batchNo.trim() !== '' && Number.isInteger(n) && n > 0 && expiry !== ''
+  const past = expiry !== '' && expiry < new Date().toISOString().slice(0, 10)
+
+  return (
+    <Sheet title="Add a batch" subtitle="What arrived, and when does it expire?" onClose={onClose}>
+      <div className="field">
+        <label htmlFor="a-drug">Which medicine?</label>
+        <select id="a-drug" className="input" value={drugId}
+                onChange={(e) => setDrugId(e.target.value)}>
+          <option value="">Choose from the list…</option>
+          {model.drugs.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
+      </div>
+
+      <div className="field">
+        <label htmlFor="a-no">Batch number <span className="hint">printed on the vial</span></label>
+        <input id="a-no" className="input" value={batchNo} autoCapitalize="characters"
+               placeholder="FMD-2411-A"
+               onChange={(e) => setBatchNo(e.target.value.toUpperCase())} />
+      </div>
+
+      <div className="field">
+        <label htmlFor="a-qty">How many {drug?.unit ?? 'vial'}s?</label>
+        <input id="a-qty" className="input" inputMode="numeric" value={qty}
+               onChange={(e) => setQty(e.target.value.replace(/\D/g, ''))} />
+      </div>
+
+      <div className="field">
+        <label htmlFor="a-exp">Expiry date</label>
+        <input id="a-exp" className="input" type="date" value={expiry}
+               onChange={(e) => setExpiry(e.target.value)} />
+      </div>
+
+      {past ? (
+        <Note kind="warn">
+          That date has already passed. This batch will be logged as expired and will
+          not be offered to other clinics.
+        </Note>
+      ) : null}
+
+      {drug?.requiresColdChain ? (
+        <div className="field">
+          <label htmlFor="a-cold">
+            Cold storage <span className="hint">this medicine must stay 2–8°C</span>
+          </label>
+          <select id="a-cold" className="input" value={coldOk ? 'yes' : 'no'}
+                  onChange={(e) => setColdOk(e.target.value === 'yes')}>
+            <option value="yes">Kept cold the whole time</option>
+            <option value="no">Cold chain was broken</option>
+          </select>
+          {!coldOk ? (
+            <Note kind="warn">
+              This batch will be quarantined and never offered to another clinic.
+              A vaccine that arrives inert is worse than none — the herd goes on
+              the register as protected.
+            </Note>
+          ) : null}
+        </div>
+      ) : null}
+
+      <button
+        className="btn" disabled={!valid || busy}
+        onClick={async () => {
+          setBusy(true)
+          await enqueue('create_batch', {
+            p_drug_id: drugId, p_batch_no: batchNo.trim(), p_expiry_date: expiry,
+            p_cold_chain_ok: drug?.requiresColdChain ? coldOk : true,
+            p_qty: n, p_client_ts: new Date().toISOString(),
+          })
+          onClose()
+        }}
+      >
+        {busy ? 'Saving…' : `Add ${qty || '0'} ${drug?.unit ?? 'vial'}s`}
       </button>
       <button className="btn btn-quiet" onClick={onClose}>Cancel</button>
     </Sheet>

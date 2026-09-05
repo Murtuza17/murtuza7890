@@ -76,6 +76,71 @@ console.log('== layout and rendering ==')
 }
 
 console.log('')
+console.log('== log inventory: count, batch no, cold storage, expiry (must-build #1) ==')
+{
+  const { ctx, page } = await signIn('DVKD', '4567')
+  const before = await page.locator('.card').count()
+
+  await page.click('button:has-text("Add a batch")')
+  await page.waitForSelector('.sheet')
+  const fields = await page.locator('.sheet .field label').allInnerTexts()
+  ok(fields.some((f) => /which medicine/i.test(f)), 'medicine comes from the controlled catalogue')
+  ok(fields.some((f) => /batch number/i.test(f)), 'batch number captured')
+  ok(fields.some((f) => /how many/i.test(f)), 'vial count captured')
+  ok(fields.some((f) => /expiry date/i.test(f)), 'expiry date captured')
+
+  // Pick a cold-chain drug so the cold-storage field appears.
+  const options = await page.locator('#a-drug option').allInnerTexts()
+  const vaccine = options.find((o) => /vaccine|antivenom/i.test(o))
+  await page.selectOption('#a-drug', { label: vaccine })
+  await page.waitForTimeout(150)
+  ok((await page.locator('#a-cold').count()) === 1,
+     'cold-storage status is asked for a cold-chain medicine')
+
+  await page.fill('#a-no', 'E2E-0001')
+  await page.fill('#a-qty', '25')
+  await page.fill('#a-exp', '2027-03-01')
+  await page.click('.sheet button:has-text("Add 25")')
+  await page.waitForTimeout(2500)
+
+  ok((await page.locator('.card').count()) > before, 'the new batch appears on the shelf')
+  ok((await page.locator('main').innerText()).includes('E2E-0001'), 'and shows its batch number')
+  await ctx.close()
+}
+
+console.log('')
+console.log('== post a request by urgency and radius (must-build #2) ==')
+{
+  const { ctx, page } = await signIn('DVKD', '4567')
+  await page.click('.tab:has-text("Requests")')
+  await page.click('button:has-text("Ask for medicine")')
+  await page.waitForSelector('.sheet')
+  const labels = await page.locator('.sheet .field label').allInnerTexts()
+  ok(labels.some((l) => /how urgent/i.test(l)), 'urgency level captured')
+  ok(labels.some((l) => /how far/i.test(l)), 'target village radius captured')
+  await ctx.close()
+}
+
+console.log('')
+console.log('== matching explains itself (must-build #3) ==')
+{
+  const { ctx, page } = await signIn('BLNG', '5678')
+  await page.click('.tab:has-text("Requests")')
+  await page.waitForTimeout(300)
+  await page.locator('.card', { hasText: 'Your request' }).first()
+    .locator('button:has-text("See who can help")').click()
+  await page.waitForSelector('.sheet')
+  const sheet = await page.locator('.sheet').innerText()
+
+  // Spec 6: never surface a match without saying why.
+  ok(/\d+(\.\d+)? km ·/.test(sheet), 'every match states the distance', sheet.slice(0, 140))
+  ok(/expires in|expires today|expires tomorrow/.test(sheet), 'and how soon it expires')
+  ok(/free/.test(sheet), 'and how much is actually free')
+  await page.screenshot({ path: 'e2e/shot-matches.png' })
+  await ctx.close()
+}
+
+console.log('')
 console.log('== offline queue drains (must-build #5) ==')
 {
   const { ctx, page } = await signIn('MBNR', '1234')
