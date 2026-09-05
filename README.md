@@ -88,6 +88,13 @@ The PINs are also listed on the sign-in screen, so nobody has to go hunting.
 Distances are real. The clinics sit 13–34 km apart in Mahabubnagar district,
 Telangana, so the radius filter and the cold-box threshold both actually bite.
 
+## The double-claim and the offline queue, in 15 seconds
+
+![Two clinics claim the same 4 vials of antivenom — one gets handoff codes, the other is told who won and when. Then a stock update queues offline as "Waiting to send" and drains to "Saved" once signal returns.](docs/demo.gif)
+
+Judging criteria #1 and #2 — the matching/handoff workflow and edge-case
+handling — are what the video is of. Try both yourself below; they're real, not staged.
+
 ## Two things worth trying first
 
 **The double-claim (60 seconds).** Open two browser windows. Sign in as `BLNG`

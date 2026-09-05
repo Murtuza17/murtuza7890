@@ -139,7 +139,6 @@ instead.
 3. **Push notifications.** An outbreak request currently waits to be noticed. SMS
    is banned by the brief and web push is unreliable on the target handsets, but
    "nobody looked at the board" is a real failure mode.
-4. **A demo GIF in the README.** Explicitly the first thing the brief says to cut.
 
 **Chosen against, not run out of time for:** Supabase Realtime (a held websocket
 costs battery and data on a handset idle in a drawer; a 20-second poll plus
@@ -160,7 +159,10 @@ makes about webfonts, with a bigger number.
    filters on the expiry *date*, not the column, so expired stock is never
    offered — but two sources of truth for one fact will eventually disagree.
    The same lazy sweep that expires reservations should age batches too.
-3. No demo GIF in the README. The brief names it as the first thing to cut, and
-   the offline toggle and the seeded contested batch make both failure modes
-   reproducible in about fifteen seconds each, which is the point the GIF was
-   there to serve.
+
+**Not cut after all:** the demo GIF (`docs/demo.gif`, in the README). The brief
+names it the first thing to drop under time pressure, and it was the right call
+to drop initially — but with the clock no longer binding, it earns its place:
+two of five judging criteria are about failure handling, and a recording of the
+real double-claim rejection and the real offline queue draining is more
+convincing at a glance than a paragraph asserting they work.
