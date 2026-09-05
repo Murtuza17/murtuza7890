@@ -29,3 +29,7 @@ dist-ssr
 
 # local postgres scratch
 /tmp/vetswap-*
+
+# e2e artifacts
+.env.e2e
+e2e/shot-*.png

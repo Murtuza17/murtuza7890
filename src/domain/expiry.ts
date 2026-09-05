@@ -28,12 +28,35 @@ export const EXPIRY_BANDS: Readonly<Record<ExpiryBand, { label: string; icon: st
 
 const DAY_MS = 86_400_000
 
+/**
+ * Normalise anything date-shaped to `YYYY-MM-DD`.
+ *
+ * Postgres dates arrive as bare `2026-09-19` through PostgREST, but a driver
+ * that hydrates them into Date objects yields `Thu Sep 19 2026 ...` instead.
+ * Blindly appending a time to that produced `NaN`, which rendered as
+ * "expires in NaN months" AND banded expiring stock as safely in date — the
+ * dangerous direction. Caught in a browser, not by a unit test, which is why
+ * this now has both.
+ *
+ * Returns null when the input genuinely cannot be read, so callers must decide
+ * rather than silently propagating NaN.
+ */
+export function normalizeDate(value: string): string | null {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+  if (/^\d{4}-\d{2}-\d{2}T/.test(value)) return value.slice(0, 10)
+  const parsed = Date.parse(value)
+  if (Number.isNaN(parsed)) return null
+  return new Date(parsed).toISOString().slice(0, 10)
+}
+
 /** Whole days from `now` to the END of the expiry date — a batch is good all day. */
 export function daysUntilExpiry(expiryDate: IsoDate, now: Date): number {
-  const expiry = Date.parse(`${expiryDate}T23:59:59.999Z`)
-  const today = Date.parse(
-    `${now.toISOString().slice(0, 10)}T00:00:00.000Z`,
-  )
+  const day = normalizeDate(expiryDate)
+  // Unreadable expiry fails towards "expired". Showing bad stock as in date is
+  // how an inert vaccine gets administered; the opposite is a wasted trip.
+  if (day === null) return Number.NEGATIVE_INFINITY
+  const expiry = Date.parse(`${day}T23:59:59.999Z`)
+  const today = Date.parse(`${now.toISOString().slice(0, 10)}T00:00:00.000Z`)
   return Math.floor((expiry - today) / DAY_MS)
 }
 
@@ -53,6 +76,7 @@ export function isExpired(expiryDate: IsoDate, now: Date): boolean {
 /** Plain language, no library. "expires in 9 days", "expired 3 days ago". */
 export function humanizeExpiry(expiryDate: IsoDate, now: Date): string {
   const days = daysUntilExpiry(expiryDate, now)
+  if (!Number.isFinite(days)) return 'expiry date unclear — check the vial'
   if (days < -1) return `expired ${Math.abs(days)} days ago`
   if (days === -1) return 'expired yesterday'
   if (days === 0) return 'expires today'

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bandFor, daysUntilExpiry, humanizeAge, humanizeExpiry, isExpired } from './expiry'
+import { bandFor, daysUntilExpiry, humanizeAge, humanizeExpiry, isExpired, normalizeDate } from './expiry'
 
 const now = new Date('2026-09-05T10:00:00.000Z')
 
@@ -60,5 +60,38 @@ describe('staleness marker', () => {
     ['2026-09-02T10:00:00.000Z', '3 days ago'],
   ] as const)('%s -> "%s"', (then, text) => {
     expect(humanizeAge(new Date(then), now)).toBe(text)
+  })
+})
+
+describe('date shapes', () => {
+  it('accepts a bare date', () => {
+    expect(normalizeDate('2026-09-14')).toBe('2026-09-14')
+  })
+
+  it('accepts a full timestamp', () => {
+    expect(normalizeDate('2026-09-14T00:00:00.000Z')).toBe('2026-09-14')
+  })
+
+  it('accepts what a Date stringifies to', () => {
+    // A driver that hydrates SQL dates into Date objects produces this. It used
+    // to yield "expires in NaN months" and a green in-date band.
+    expect(normalizeDate(String(new Date('2026-09-14T00:00:00.000Z')))).toBe('2026-09-14')
+  })
+
+  it('reports genuinely unreadable input rather than guessing', () => {
+    expect(normalizeDate('not a date')).toBeNull()
+  })
+
+  it('bands an unreadable expiry as expired, never as in date', () => {
+    // Showing bad stock as in date is how an inert vaccine gets administered.
+    expect(bandFor('not a date', now)).toBe('expired')
+    expect(humanizeExpiry('not a date', now)).toBe('expiry date unclear — check the vial')
+  })
+
+  it('gives the same answer for every shape of the same day', () => {
+    const shapes = ['2026-09-14', '2026-09-14T00:00:00.000Z', String(new Date('2026-09-14T12:00:00Z'))]
+    const answers = new Set(shapes.map((s) => daysUntilExpiry(s, now)))
+    expect(answers.size).toBe(1)
+    expect([...answers][0]).toBe(9)
   })
 })

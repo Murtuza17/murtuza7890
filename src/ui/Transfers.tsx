@@ -104,7 +104,18 @@ function TransferCard({
         <div className="card-meta">Handed over {humanizeAge(new Date(transfer.completedAt), now)}</div>
       ) : null}
 
-      <button className="btn btn-quiet" onClick={onOpen}>Open</button>
+      <button
+        className={
+          transfer.status === 'proposed' && transfer.toClinicId === session.clinic.id
+            ? 'btn'
+            : 'btn btn-quiet'
+        }
+        onClick={onOpen}
+      >
+        {transfer.status === 'proposed' && transfer.toClinicId === session.clinic.id
+          ? `Claim ${transfer.qty} ${drug?.unit ?? 'vial'}s`
+          : 'Open'}
+      </button>
     </div>
   )
 }
@@ -143,7 +154,15 @@ function TransferSheet({
 
   return (
     <Sheet title={title} subtitle={`${drug?.name ?? ''} · ${other?.name ?? ''}`} onClose={onClose}>
-      {rejected ? <Note kind="error">{rejected.lastError}</Note> : null}
+      {rejected ? (
+        <Note kind="error">
+          <b>{rejected.lastError}</b>
+          <div style={{ marginTop: 6, fontWeight: 400 }}>
+            Nothing was reserved for you. Look for another dispensary on the Requests
+            tab, or call {other?.phone ?? 'the holding clinic'}.
+          </div>
+        </Note>
+      ) : null}
       {queued && !rejected ? (
         <Note kind="warn">Waiting to send — not confirmed yet.</Note>
       ) : null}
@@ -166,11 +185,39 @@ function TransferSheet({
             Works with no signal — both phones remember, and they match up later.
           </div>
         </>
-      ) : (
+      ) : rejected ? null : (
         <Note kind="info">
           Codes appear once this is claimed. Nothing has been reserved yet.
         </Note>
       )}
+
+      {/* An offer made TO this clinic. Claiming is contested — two clinics can
+          be looking at this same screen for the same four vials — so the server
+          arbitrates and the loser gets told who won. */}
+      {!outgoing && transfer.status === 'proposed' && !rejected ? (
+        <>
+          <button
+            className="btn" disabled={busy || Boolean(queued)}
+            onClick={async () => {
+              setBusy(true)
+              await enqueue('accept_transfer', { p_transfer_id: transfer.id })
+              setBusy(false)
+            }}
+          >
+            {busy ? 'Claiming…' : `Claim ${transfer.qty} ${drug?.unit ?? 'vial'}s`}
+          </button>
+          <button
+            className="btn btn-quiet" disabled={busy || Boolean(queued)}
+            onClick={async () => {
+              setBusy(true)
+              await enqueue('decline_transfer', { p_transfer_id: transfer.id, p_note: '' })
+              setBusy(false)
+            }}
+          >
+            We do not need this
+          </button>
+        </>
+      ) : null}
 
       {/* Sender dispatches. Confirmation first: the vials leave the shelf now. */}
       {outgoing && transfer.status === 'accepted' ? (
