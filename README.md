@@ -8,7 +8,7 @@ shortages, and confirm the physical handoff between two clinics.
 Built for a livestock assistant on a cheap Android phone, outdoors, on 2G,
 during an outbreak. Every trade-off below follows from that sentence.
 
-- **Live app:** _add the Vercel URL here after deploying_
+- **Live app:** [sidproject-zeta.vercel.app](https://sidproject-zeta.vercel.app)
 - **Trade-off memo:** [`MEMO.md`](./MEMO.md)
 - **The brief:** [`docs/brief/`](./docs/brief/) · full spec in [`CLAUDE.md`](./CLAUDE.md)
 
