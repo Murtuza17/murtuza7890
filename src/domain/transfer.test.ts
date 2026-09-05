@@ -12,8 +12,8 @@ import {
 const ctx: TransferContext = {
   batchId: 'b1',
   qty: 4,
-  fromClinicId: 'clinic-marur',
-  toClinicId: 'clinic-kadthal',
+  fromClinicId: 'c-addakal',
+  toClinicId: 'c-mbnr',
 }
 
 const ACCEPT: TransferEvent = {
@@ -78,8 +78,8 @@ describe('happy path', () => {
       kind: 'ship',
       batchId: 'b1',
       qty: 4,
-      fromClinicId: 'clinic-marur',
-      toClinicId: 'clinic-kadthal',
+      fromClinicId: 'c-addakal',
+      toClinicId: 'c-mbnr',
     })
   })
 })
