@@ -453,22 +453,25 @@ function PostSheet({ model, onClose }: { model: BoardModel; onClose: () => void 
   const [sentence, setSentence] = useState('')
   const [parsing, setParsing] = useState(false)
   const [listening, setListening] = useState(false)
-  const [speechSupported] = useState(() =>
-    typeof window !== 'undefined' &&
-    ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window),
-  )
   const [intakeNote, setIntakeNote] = useState<
     { kind: 'error' | 'warn' | 'info'; text: string } | null
   >(null)
 
   function startListening() {
-    if (!speechSupported) return
     const SpeechAPI =
-      (window as unknown as { SpeechRecognition?: new () => any; webkitSpeechRecognition?: new () => any })
-        .SpeechRecognition ||
-      (window as unknown as { webkitSpeechRecognition?: new () => any }).webkitSpeechRecognition
+      typeof window !== 'undefined'
+        ? (window as unknown as { SpeechRecognition?: new () => any; webkitSpeechRecognition?: new () => any })
+            .SpeechRecognition ||
+          (window as unknown as { webkitSpeechRecognition?: new () => any }).webkitSpeechRecognition
+        : undefined
 
-    if (!SpeechAPI) return
+    if (!SpeechAPI) {
+      setIntakeNote({
+        kind: 'warn',
+        text: 'Voice dictation is supported in Chrome, Edge, and Safari. On Firefox, please type your request.',
+      })
+      return
+    }
 
     try {
       const recognition = new SpeechAPI()
@@ -476,9 +479,17 @@ function PostSheet({ model, onClose }: { model: BoardModel; onClose: () => void 
       recognition.interimResults = false
       recognition.maxAlternatives = 1
 
-      recognition.onstart = () => setListening(true)
+      recognition.onstart = () => {
+        setListening(true)
+        setIntakeNote({ kind: 'info', text: 'Listening… speak your medicine need.' })
+      }
       recognition.onend = () => setListening(false)
-      recognition.onerror = () => setListening(false)
+      recognition.onerror = (e: { error?: string }) => {
+        setListening(false)
+        if (e.error === 'not-allowed') {
+          setIntakeNote({ kind: 'error', text: 'Microphone permission denied. Allow microphone access to dictate.' })
+        }
+      }
 
       recognition.onresult = (event: { results?: { [index: number]: { [index: number]: { transcript: string } } } }) => {
         const transcript = event.results?.[0]?.[0]?.transcript
@@ -557,16 +568,14 @@ function PostSheet({ model, onClose }: { model: BoardModel; onClose: () => void 
           >
             {parsing ? 'Reading…' : 'Fill this in for me'}
           </button>
-          {speechSupported ? (
-            <button
-              type="button"
-              className={`btn btn-quiet ${listening ? 'band-critical' : ''}`}
-              style={{ minWidth: 105, flexShrink: 0 }}
-              onClick={startListening}
-            >
-              {listening ? 'Listening…' : '🎙️ Dictate'}
-            </button>
-          ) : null}
+          <button
+            type="button"
+            className={`btn btn-quiet ${listening ? 'band-critical' : ''}`}
+            style={{ minWidth: 110, flexShrink: 0 }}
+            onClick={startListening}
+          >
+            {listening ? 'Listening…' : '🎙️ Dictate'}
+          </button>
         </div>
         {intakeNote ? (
           <Note kind={intakeNote.kind === 'error' ? 'error' : intakeNote.kind === 'warn' ? 'warn' : 'info'}>
