@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: unit tests (domain logic)
+        run: npm test
+
+      - name: database tests (schema, RPCs, RLS, claim arbitration)
+        # Postgres 16 ships on the runner; no Supabase account needed.
+        run: |
+          sudo systemctl stop postgresql || true
+          PGBIN=$(ls -d /usr/lib/postgresql/*/bin | tail -1) ./scripts/test-db.sh --race
+
+      - name: build
+        run: npm run build
