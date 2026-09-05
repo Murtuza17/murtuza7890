@@ -24,7 +24,10 @@ const FMD: Drug = {
 }
 
 const signal = (over: Partial<ConsumptionStats>) =>
-  demandSignal({ dispensed14d: 0, dispensed30d: 0, dispensed90d: 0, events: 0, observedDays: 90, ...over })
+  demandSignal({
+    dispensed14d: 0, dispensed30d: 0, dispensed90d: 0, events: 0, events14d: 0,
+    observedDays: 90, ...over,
+  })
 
 /** Watched 60 days, never dispensed: high confidence the whole batch is doomed. */
 const IDLE = signal({ dispensed90d: 0, events: 0, observedDays: 60 })
@@ -39,6 +42,14 @@ const batch = (over: Partial<ClinicDrugPosition['batches'][number]> = {}) => ({
 const position = (over: Partial<ClinicDrugPosition>): ClinicDrugPosition => ({
   clinicId: 'c-addakal', drugId: 'd-fmd', onHand: 30, signal: IDLE, batches: [batch()], ...over,
 })
+
+/**
+ * A receiver's usable stock now comes from its batches, not the `onHand`
+ * scalar — onHand can include expired or quarantined vials, which must not
+ * count as cover. Every receiver fixture below has to actually hold what its
+ * `onHand` claims, so this line-up should read exactly as onHand.
+ */
+const holding = (qty: number) => [batch({ id: 'stock', batchNo: 'STOCK', available: qty })]
 
 function input(positions: ClinicDrugPosition[], over: Partial<AnticipateInput> = {}): AnticipateInput {
   return {
@@ -55,7 +66,7 @@ describe('proposing a transfer nobody asked for', () => {
   it('pairs a clinic that will waste stock with one that will run out', () => {
     const out = anticipateTransfers(input([
       position({ clinicId: 'c-addakal', signal: IDLE, onHand: 30 }),
-      position({ clinicId: 'c-mbnr', signal: STEADY, onHand: 5, batches: [] }),
+      position({ clinicId: 'c-mbnr', signal: STEADY, onHand: 5, batches: holding(5) }),
     ]))
     expect(out).toHaveLength(1)
     expect(out[0]?.fromClinicId).toBe('c-addakal')
@@ -66,7 +77,7 @@ describe('proposing a transfer nobody asked for', () => {
   it('says why, in terms a worker can check', () => {
     const out = anticipateTransfers(input([
       position({ clinicId: 'c-addakal', signal: IDLE, onHand: 30 }),
-      position({ clinicId: 'c-mbnr', signal: STEADY, onHand: 5, batches: [] }),
+      position({ clinicId: 'c-mbnr', signal: STEADY, onHand: 5, batches: holding(5) }),
     ]))
     expect(out[0]?.why).toContain('Addakal is not using these')
     expect(out[0]?.why).toContain('Mahabubnagar runs out in 5 days')
@@ -91,7 +102,7 @@ describe('guard 1: a suggestion must never cause the stockout it prevents', () =
       position({
         clinicId: 'c-mbnr',
         signal: signal({ dispensed90d: 450, events: 60, observedDays: 90 }),
-        onHand: 1, batches: [],
+        onHand: 1, batches: holding(1),
       }),
     ]))
     expect(out[0]?.qty).toBeLessThanOrEqual(15)
@@ -120,7 +131,7 @@ describe('guard 2: a suggestion must not just relocate the bin', () => {
         clinicId: 'c-addakal', signal: IDLE, onHand: 40,
         batches: [batch({ available: 40, expiryDate: '2026-09-06' })],
       }),
-      position({ clinicId: 'c-mbnr', signal: STEADY, onHand: 5, batches: [] }),
+      position({ clinicId: 'c-mbnr', signal: STEADY, onHand: 5, batches: holding(5) }),
     ]))).toHaveLength(0)
   })
 })
@@ -132,7 +143,7 @@ describe('safety filters', () => {
         clinicId: 'c-addakal', signal: IDLE, onHand: 30,
         batches: [batch({ coldChainOk: false })],
       }),
-      position({ clinicId: 'c-mbnr', signal: STEADY, onHand: 2, batches: [] }),
+      position({ clinicId: 'c-mbnr', signal: STEADY, onHand: 2, batches: holding(2) }),
     ]))).toHaveLength(0)
   })
 
@@ -142,21 +153,21 @@ describe('safety filters', () => {
         clinicId: 'c-addakal', signal: IDLE, onHand: 30,
         batches: [batch({ status: 'quarantined' })],
       }),
-      position({ clinicId: 'c-mbnr', signal: STEADY, onHand: 2, batches: [] }),
+      position({ clinicId: 'c-mbnr', signal: STEADY, onHand: 2, batches: holding(2) }),
     ]))).toHaveLength(0)
   })
 
   it('stays inside the radius', () => {
     expect(anticipateTransfers(input([
       position({ clinicId: 'c-addakal', signal: IDLE, onHand: 30 }),
-      position({ clinicId: 'c-midjil', signal: STEADY, onHand: 2, batches: [] }),
+      position({ clinicId: 'c-midjil', signal: STEADY, onHand: 2, batches: holding(2) }),
     ], { radiusKm: 10 }))).toHaveLength(0)
   })
 
   it('flags a cold box when the trip is too long unrefrigerated', () => {
     const out = anticipateTransfers(input([
       position({ clinicId: 'c-addakal', signal: IDLE, onHand: 30 }),
-      position({ clinicId: 'c-midjil', signal: STEADY, onHand: 2, batches: [] }),
+      position({ clinicId: 'c-midjil', signal: STEADY, onHand: 2, batches: holding(2) }),
     ]))
     expect(out[0]?.needsColdBox).toBe(true)
   })
@@ -167,7 +178,7 @@ describe('the honesty rule holds here too', () => {
     const brandNew = signal({ dispensed90d: 20, events: 2, observedDays: 3 })
     expect(anticipateTransfers(input([
       position({ clinicId: 'c-addakal', signal: brandNew, onHand: 30 }),
-      position({ clinicId: 'c-mbnr', signal: STEADY, onHand: 2, batches: [] }),
+      position({ clinicId: 'c-mbnr', signal: STEADY, onHand: 2, batches: holding(2) }),
     ]))).toHaveLength(0)
   })
 
@@ -175,7 +186,7 @@ describe('the honesty rule holds here too', () => {
     const thin = signal({ dispensed90d: 20, events: 3, observedDays: 10 })  // low
     const out = anticipateTransfers(input([
       position({ clinicId: 'c-addakal', signal: IDLE, onHand: 30 }),        // high
-      position({ clinicId: 'c-mbnr', signal: thin, onHand: 1, batches: [] }),
+      position({ clinicId: 'c-mbnr', signal: thin, onHand: 1, batches: holding(1) }),
     ]))
     expect(out[0]?.confidence).toBe('low')
   })
@@ -185,8 +196,8 @@ describe('ranking and de-duplication', () => {
   it('puts the clinic that runs out soonest first', () => {
     const out = anticipateTransfers(input([
       position({ clinicId: 'c-addakal', signal: IDLE, onHand: 30 }),
-      position({ clinicId: 'c-mbnr', signal: STEADY, onHand: 2, batches: [] }),
-      position({ clinicId: 'c-midjil', signal: STEADY, onHand: 9, batches: [] }),
+      position({ clinicId: 'c-mbnr', signal: STEADY, onHand: 2, batches: holding(2) }),
+      position({ clinicId: 'c-midjil', signal: STEADY, onHand: 9, batches: holding(9) }),
     ]))
     expect(out.map((t) => t.toClinicId)).toEqual(['c-mbnr', 'c-midjil'])
   })
@@ -199,7 +210,7 @@ describe('ranking and de-duplication', () => {
         clinicId: 'c-addakal', signal: IDLE, onHand: 60,
         batches: [batch({ id: 'b1' }), batch({ id: 'b2', batchNo: 'FMD-2' })],
       }),
-      position({ clinicId: 'c-mbnr', signal: STEADY, onHand: 3, batches: [] }),
+      position({ clinicId: 'c-mbnr', signal: STEADY, onHand: 3, batches: holding(3) }),
     ]))
     expect(out.length).toBeGreaterThan(1)
     expect(bestPerNeed(out)).toHaveLength(1)
@@ -208,8 +219,8 @@ describe('ranking and de-duplication', () => {
   it('is a total order — the board does not reshuffle between reads', () => {
     const positions = [
       position({ clinicId: 'c-addakal', signal: IDLE, onHand: 30 }),
-      position({ clinicId: 'c-mbnr', signal: STEADY, onHand: 4, batches: [] }),
-      position({ clinicId: 'c-midjil', signal: STEADY, onHand: 4, batches: [] }),
+      position({ clinicId: 'c-mbnr', signal: STEADY, onHand: 4, batches: holding(4) }),
+      position({ clinicId: 'c-midjil', signal: STEADY, onHand: 4, batches: holding(4) }),
     ]
     const a = anticipateTransfers(input(positions)).map((t) => t.toClinicId)
     const b = anticipateTransfers(input([...positions].reverse())).map((t) => t.toClinicId)

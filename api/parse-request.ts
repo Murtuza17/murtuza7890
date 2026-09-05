@@ -95,7 +95,11 @@ export default async function handler(req: Request): Promise<Response> {
   try {
     const response = await client.messages.create({
       model: 'claude-opus-5',
-      max_tokens: 1024,
+      // Opus 5 runs adaptive thinking by default and those tokens count
+      // against this budget. 1024 left the structured JSON getting truncated
+      // mid-object on longer sentences — which surfaced to the worker as
+      // "could not read that" for input that was perfectly readable.
+      max_tokens: 8192,
       // Extraction from one sentence is a simple task — low effort keeps it
       // fast for someone on a bad connection and cheap against a free
       // allowance, without changing the model doing the work.
@@ -143,14 +147,26 @@ export default async function handler(req: Request): Promise<Response> {
     if (response.stop_reason === 'refusal') {
       return json({ ok: false, error: 'refused' }, 422)
     }
+    // Truncated output is not valid JSON, so parsing it would throw and the
+    // worker would be told their sentence was unreadable. Say what actually
+    // happened instead.
+    if (response.stop_reason === 'max_tokens') {
+      return json({ ok: false, error: 'truncated' }, 502)
+    }
 
     const block = response.content.find((b) => b.type === 'text')
     if (!block || block.type !== 'text') {
       return json({ ok: false, error: 'empty_response' }, 502)
     }
 
-    // Parsed, never string-matched — escaping varies between models.
-    return json({ ok: true, proposal: JSON.parse(block.text) }, 200)
+    // Parsed, never string-matched — escaping varies between models. A parse
+    // failure is the model's problem, not the worker's: report it as such
+    // rather than letting it surface as an unhandled 500.
+    try {
+      return json({ ok: true, proposal: JSON.parse(block.text) }, 200)
+    } catch {
+      return json({ ok: false, error: 'unparseable' }, 502)
+    }
   } catch (err) {
     if (err instanceof Anthropic.RateLimitError) {
       return json({ ok: false, error: 'rate_limited' }, 429)

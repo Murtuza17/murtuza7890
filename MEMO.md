@@ -23,6 +23,22 @@ Everything below is a consequence.
 
 ---
 
+## Where AI is used, and where it is not
+
+Two tools, chosen per job. **Forecasting** is deterministic arithmetic over the
+ledger — it runs on-device in under a millisecond with the connection cut, which
+is why it is not a model call: the user is on 2G mid-outbreak and may have no
+signal exactly when the stakes peak. It closes the loop, pairing predicted waste
+at one clinic against predicted stockout at another and proposing the transfer
+with no human trigger at all. **A language model** handles one sentence of
+English or Telugu into a draft request — off the critical path, key held
+server-side, every field re-validated against the catalogue, and degrading to
+the untouched manual form when it is unavailable. Nothing a worker must be able
+to check — match ranking, claim arbitration — uses a model.
+
+Full reasoning, including what I got wrong about the "no paid APIs" constraint:
+[`docs/ai-design.md`](docs/ai-design.md).
+
 ## Trust safeguards
 
 **Contested actions are never decided on the device.** Every action is one of two

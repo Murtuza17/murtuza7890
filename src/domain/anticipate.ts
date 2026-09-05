@@ -36,7 +36,7 @@
 
 import { haversineKm, formatKm, COLD_BOX_THRESHOLD_KM } from './matching'
 import { daysUntilExpiry, humanizeExpiry, isExpired } from './expiry'
-import { batchOutlook, type Confidence, type DemandSignal } from './forecast'
+import { positionOutlook, type Confidence, type DemandSignal } from './forecast'
 import type { Clinic, Drug } from './types'
 
 export interface PositionBatch {
@@ -95,6 +95,15 @@ function weaker(a: Confidence, b: Confidence): Confidence {
   return CONFIDENCE_ORDER[a] <= CONFIDENCE_ORDER[b] ? a : b
 }
 
+/** A receiver already resolved against one sender: distance checked, its own rate read. */
+interface ReceiverCandidate {
+  readonly receiver: ClinicDrugPosition
+  readonly to: Clinic
+  readonly distanceKm: number
+  readonly usableOnHand: number
+  readonly runsOutInDays: number
+}
+
 /**
  * Suggestions are unsolicited, so the bar is deliberately higher than for a
  * match a human went looking for: both sides must be at least `low` confidence
@@ -120,47 +129,93 @@ export function anticipateTransfers(input: AnticipateInput): AnticipatedTransfer
       const from = clinicsById.get(sender.clinicId)
       if (!from) continue
 
-      for (const batch of sender.batches) {
-        if (batch.status !== 'active') continue
-        if (batch.available <= 0) continue
-        if (isExpired(batch.expiryDate, now)) continue
-        // A broken cold chain arrives inert and gets recorded as a successful
-        // vaccination. Never propose moving one.
-        if (drug.requiresColdChain && !batch.coldChainOk) continue
+      // One rate shared across the sender's batches, soonest-expiry-first.
+      // Applying it to each batch independently would double-count the same
+      // demand and hide real surplus — see positionOutlook.
+      const sendable = sender.batches.filter(
+        (b) =>
+          b.status === 'active' &&
+          b.available > 0 &&
+          !isExpired(b.expiryDate, now) &&
+          // A broken cold chain arrives inert and gets recorded as a successful
+          // vaccination. Never propose moving one.
+          !(drug.requiresColdChain && !b.coldChainOk),
+      )
+      const outlooks = new Map(
+        positionOutlook(sendable, sender.signal, now, drug.unit).map((o) => [o.batchId, o]),
+      )
 
-        const outlook = batchOutlook(batch, batch.available, sender.signal, now, drug.unit)
+      // Vials already promised to an earlier receiver in this same pass. One
+      // batch of 30 must not read as "send 25" to two different clinics.
+      let spokenFor = 0
+
+      // Candidates are resolved and ordered ONCE per sender, not inside the
+      // batch loop. That order matters: when surplus is scarce, `spokenFor`
+      // above hands it to whichever receiver is considered first. Iterating
+      // in the caller's array order would let the same board produce a
+      // different winner depending only on what order positions happened to
+      // arrive in — a worker refreshing the page must not see the suggestion
+      // reshuffle. Sorting by urgency instead makes the tie-break a product
+      // decision (serve whoever runs out soonest) rather than an accident of
+      // fetch order.
+      const receiverCandidates: ReceiverCandidate[] = []
+      for (const receiver of group) {
+        if (receiver.clinicId === sender.clinicId) continue
+        if (receiver.signal.confidence === 'none') continue
+        if (receiver.signal.planningRate <= 0) continue
+
+        const to = clinicsById.get(receiver.clinicId)
+        if (!to) continue
+
+        const distanceKm = haversineKm(from, to)
+        if (distanceKm > radiusKm) continue
+
+        // Only stock the receiver can actually use counts as cover. Their
+        // onHand includes expired and quarantined batches, and a clinic whose
+        // only stock is expired looks fully supplied while having nothing —
+        // exactly the clinic that most needs resupplying.
+        const usableOnHand = receiver.batches
+          .filter((b) => b.status === 'active' && !isExpired(b.expiryDate, now))
+          .reduce((sum, b) => sum + b.available, 0)
+
+        const runsOutInDays = Math.floor(usableOnHand / receiver.signal.planningRate)
+        receiverCandidates.push({ receiver, to, distanceKm, usableOnHand, runsOutInDays })
+      }
+      receiverCandidates.sort(
+        (a, b) =>
+          a.runsOutInDays - b.runsOutInDays || a.receiver.clinicId.localeCompare(b.receiver.clinicId),
+      )
+
+      for (const batch of sendable) {
+        const outlook = outlooks.get(batch.id)
+        if (!outlook) continue
         if (outlook.risk !== 'will_expire_unused' || outlook.projectedWaste < 1) continue
 
         const daysToExpiry = daysUntilExpiry(batch.expiryDate, now)
 
-        for (const receiver of group) {
-          if (receiver.clinicId === sender.clinicId) continue
-          if (receiver.signal.confidence === 'none') continue
-          if (receiver.signal.dailyRate <= 0) continue
-
-          const to = clinicsById.get(receiver.clinicId)
-          if (!to) continue
-
-          const distanceKm = haversineKm(from, to)
-          if (distanceKm > radiusKm) continue
-
+        for (const { receiver, to, distanceKm, usableOnHand, runsOutInDays } of receiverCandidates) {
           // Does the receiver actually run short inside a horizon worth acting on?
-          const runsOutInDays = Math.floor(receiver.onHand / receiver.signal.dailyRate)
           if (runsOutInDays > daysToExpiry) continue
 
           // Guard 1: never take more than the sender was going to waste anyway,
-          // so a suggestion cannot cause the stockout it exists to prevent.
-          const senderCanSpare = Math.min(outlook.projectedWaste, batch.available)
+          // so a suggestion cannot cause the stockout it exists to prevent —
+          // less anything already promised to an earlier receiver.
+          const senderCanSpare = Math.max(
+            0,
+            Math.min(outlook.projectedWaste, batch.available) - spokenFor,
+          )
+          if (senderCanSpare < 1) continue
 
           // Guard 2: never relocate the bin. Cap at what the receiver can get
           // through before this same expiry date.
-          const receiverCanUse = Math.floor(receiver.signal.dailyRate * daysToExpiry)
-          const receiverShortfall = Math.max(0, receiverCanUse - receiver.onHand)
+          const receiverCanUse = Math.floor(receiver.signal.planningRate * daysToExpiry)
+          const receiverShortfall = Math.max(0, receiverCanUse - usableOnHand)
 
           const qty = Math.min(senderCanSpare, receiverShortfall)
           if (qty < 1) continue
 
           const confidence = weaker(sender.signal.confidence, receiver.signal.confidence)
+          spokenFor += qty
 
           out.push({
             fromClinicId: sender.clinicId,

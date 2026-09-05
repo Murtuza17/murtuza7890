@@ -143,6 +143,7 @@ export function toModel(board: Board | null): BoardModel {
       dispensed30d: num(r, 'dispensed_30d'),
       dispensed90d: num(r, 'dispensed_90d'),
       events: num(r, 'events'),
+      events14d: num(r, 'events_14d'),
       observedDays: num(r, 'observed_days'),
     }))
   }
@@ -166,7 +167,8 @@ export function toModel(board: Board | null): BoardModel {
       positionMap.set(key, {
         clinicId: b.clinicId, drugId: b.drugId, onHand: available,
         signal: signalByClinicDrug.get(key) ?? demandSignal({
-          dispensed14d: 0, dispensed30d: 0, dispensed90d: 0, events: 0, observedDays: 0,
+          dispensed14d: 0, dispensed30d: 0, dispensed90d: 0, events: 0, events14d: 0,
+          observedDays: 0,
         }),
         batches: [entry],
       })

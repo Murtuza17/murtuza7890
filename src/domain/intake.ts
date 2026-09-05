@@ -77,6 +77,8 @@ export const MAX_QTY = 500
 
 /** Mirrors the options the manual form offers, so both paths agree. */
 export const ALLOWED_RADII = [10, 20, 40, 60] as const
+/** The deadline options the form offers. A parsed value must be one of them. */
+export const ALLOWED_NEEDED_BY_DAYS = [1, 3, 7, 14] as const
 export const MAX_NEEDED_BY_DAYS = 30
 export const MAX_NOTE_LENGTH = 140
 
@@ -120,10 +122,11 @@ export function validateProposal(
 
   const radiusKm = nearestAllowedRadius(asFiniteNumber(proposal.radiusKm))
 
-  const daysRaw = asFiniteNumber(proposal.neededByDays)
-  const neededByDays = daysRaw === null
-    ? 3
-    : Math.min(MAX_NEEDED_BY_DAYS, Math.max(0, Math.floor(daysRaw)))
+  // Snapped to an option the form actually has, for the same reason the radius
+  // is: an unsnapped 5 leaves the select rendering blank while the request is
+  // posted for today+5, so the deadline shown and the deadline submitted
+  // disagree — and the worker is trusting what they can see.
+  const neededByDays = nearestAllowedDeadline(asFiniteNumber(proposal.neededByDays))
 
   const note = (asTrimmedString(proposal.note, MAX_NOTE_LENGTH) ?? '').slice(0, MAX_NOTE_LENGTH)
 
@@ -140,6 +143,16 @@ export function nearestAllowedRadius(km: number | null): number {
   let best: number = ALLOWED_RADII[0]
   for (const option of ALLOWED_RADII) {
     if (Math.abs(option - km) < Math.abs(best - km)) best = option
+  }
+  return best
+}
+
+export function nearestAllowedDeadline(days: number | null): number {
+  if (days === null) return 3
+  const clamped = Math.min(MAX_NEEDED_BY_DAYS, Math.max(0, Math.floor(days)))
+  let best: number = ALLOWED_NEEDED_BY_DAYS[0]
+  for (const option of ALLOWED_NEEDED_BY_DAYS) {
+    if (Math.abs(option - clamped) < Math.abs(best - clamped)) best = option
   }
   return best
 }

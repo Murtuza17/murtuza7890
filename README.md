@@ -10,6 +10,7 @@ during an outbreak. Every trade-off below follows from that sentence.
 
 - **Live app:** [sidproject-zeta.vercel.app](https://sidproject-zeta.vercel.app)
 - **Trade-off memo:** [`MEMO.md`](./MEMO.md)
+- **Where AI is used, and where it isn't:** [`docs/ai-design.md`](docs/ai-design.md)
 - **The brief:** [`docs/brief/`](./docs/brief/) · full spec in [`CLAUDE.md`](./CLAUDE.md)
 
 ---
@@ -95,6 +96,24 @@ Telangana, so the radius filter and the cold-box threshold both actually bite.
 Judging criteria #1 and #2 — the matching/handoff workflow and edge-case
 handling — are what the video is of. Try both yourself below; they're real, not staged.
 
+## The board thinks ahead
+
+Two kinds of intelligence, each where it is the right tool:
+
+**It proposes transfers nobody asked for.** The ledger is a complete time series
+of demand, so the app forecasts which batches will expire unused and which
+clinics will run out, then pairs the two. In the seeded district Jadcherla holds
+48 FMD vials expiring in 27 days and barely uses FMD; Balanagar gets through
+about one a day and is nearly out; they are 13 km apart. Sign in as `BLNG` and
+the Requests tab already says **"Ask Jadcherla for 19 vials"** — with both halves
+of the reasoning shown, and marked a prediction rather than a fact. No request
+was posted. Deterministic, offline, zero cost.
+
+**It reads plain speech, in English or Telugu.** *"20 vials FMD vaccine, two
+herds down at Peddapur"* becomes a filled-in draft the worker checks and posts.
+Optional: without an API key the manual form is untouched and everything else
+works. See [`docs/ai-design.md`](docs/ai-design.md).
+
 ## Two things worth trying first
 
 **The double-claim (60 seconds).** Open two browser windows. Sign in as `BLNG`
@@ -117,7 +136,7 @@ is a race and no device may decide a race on its own.
 Everything runs locally with no Supabase account and no network.
 
 ```bash
-npm test          # 123 unit tests — ledger, state machine, matching, outbox
+npm test          # 182 unit tests — ledger, state machine, matching, forecast, outbox
 npm run test:db   # schema, RPCs, RLS probes against a throwaway Postgres 16
 npm run test:race # + five clinics claiming the same 4 vials simultaneously
 npm run test:e2e  # + the whole app in headless Chromium at 360px
@@ -125,7 +144,7 @@ npm run typecheck
 ```
 
 `test:db` spins up its own Postgres, applies the migrations verbatim, seeds, then
-asserts 60 behaviours including 13 hostile probes of what a browser holding the
+asserts 77 behaviours including 13 hostile probes of what a browser holding the
 anon key can do. `test:e2e` adds a PostgREST-compatible shim
 (`scripts/local-api.mjs`) so the real UI runs against a real database.
 
@@ -141,10 +160,14 @@ src/domain/     Pure. No React, no Supabase, no clock. All the unit tests live h
    ledger.ts      on-hand = SUM(delta); idempotent merge; server-time ordering
    transfer.ts    (state, event) => state, total over its event set
    matching.ts    haversine, filter, rank, the "why" string, partial fulfilment
+   forecast.ts    consumption rate, waste + stockout outlook, confidence
+   anticipate.ts  pairs predicted waste against predicted stockout
+   intake.ts      validates model output before a human ever sees it
    expiry.ts      bands, plain language, staleness
    outbox.ts      contested vs uncontested, and what the UI may claim
 src/data/       Adapters only. IndexedDB, fetch, session, the drain loop.
 src/ui/         React. Presentation and wiring; no rules of its own.
+api/            Serverless. Holds the model key; never reaches the browser.
 supabase/       Migrations, seed, and the server-side test suite.
 scripts/        test-db.sh, race-test.sh, e2e.sh, local-api.mjs
 ```

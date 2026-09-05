@@ -54,8 +54,10 @@ export interface ConsumptionStats {
   readonly dispensed14d: number
   readonly dispensed30d: number
   readonly dispensed90d: number
-  /** Number of distinct dispensing events, for rate precision. */
+  /** Distinct dispensing events, all time — rate precision. */
   readonly events: number
+  /** Events in the last 14 days. The surge guard needs recency, not history. */
+  readonly events14d: number
   /**
    * How long this clinic has held this drug at all — the honest denominator.
    * A clinic three days old must not have its three days extrapolated to ninety.
@@ -66,6 +68,19 @@ export interface ConsumptionStats {
 export interface DemandSignal {
   /** Vials per day, from the longest window we can justify. */
   readonly dailyRate: number
+  /**
+   * The rate every projection actually uses: the HIGHER of the baseline and the
+   * last fortnight.
+   *
+   * Both ways of being wrong point the same direction, which is what makes this
+   * the safe choice rather than a fudge. Project with too low a rate and a
+   * clinic in the middle of an outbreak — 1/day baseline, 6/day right now —
+   * looks like it will never finish its stock, gets classified as a waster, and
+   * is asked to hand vials to a neighbour a week before it needs them itself.
+   * Project with too high a rate and the worst case is a suggestion that does
+   * not fire. Assume the faster burn.
+   */
+  readonly planningRate: number
   /** Vials per day over the last 14 days — the outbreak-detecting half. */
   readonly recentRate: number
   readonly observedDays: number
@@ -99,6 +114,7 @@ export function demandSignal(stats: ConsumptionStats): DemandSignal {
 
   return {
     dailyRate,
+    planningRate: Math.max(dailyRate, recentRate),
     recentRate,
     observedDays: stats.observedDays,
     events: stats.events,
@@ -121,8 +137,10 @@ function trendFor(
   stats: ConsumptionStats,
 ): DemandSignal['trend'] {
   // A single event inside 14 days is noise, not a surge — demanding two guards
-  // against one vaccination camp reading as an outbreak.
-  const enoughRecentActivity = stats.dispensed14d > 0 && stats.events >= 2
+  // against one vaccination camp reading as an outbreak. Counted over the last
+  // fortnight specifically: all-time events would let a clinic with months of
+  // history read as surging off one camp.
+  const enoughRecentActivity = stats.dispensed14d > 0 && stats.events14d >= 2
   if (enoughRecentActivity && recentRate >= dailyRate * 2 && stats.observedDays >= 14) {
     return 'surging'
   }
@@ -164,10 +182,10 @@ export function batchOutlook(
 ): BatchOutlook {
   const daysToExpiry = daysUntilExpiry(batch.expiryDate, now)
   const usableDays = Math.max(0, daysToExpiry)
-  const projectedUse = Math.round(signal.dailyRate * usableDays)
+  const projectedUse = Math.round(signal.planningRate * usableDays)
   const projectedWaste = Math.max(0, onHand - projectedUse)
   const daysToStockout =
-    signal.dailyRate > 0 ? Math.floor(onHand / signal.dailyRate) : null
+    signal.planningRate > 0 ? Math.floor(onHand / signal.planningRate) : null
 
   const base = {
     batchId: batch.id,
@@ -195,9 +213,9 @@ export function batchOutlook(
 
   if (projectedWaste > 0) {
     const rateText =
-      signal.dailyRate === 0
+      signal.planningRate === 0
         ? `none used in ${signal.observedDays} days`
-        : `about ${round1(signal.dailyRate * 7)} ${unit}s a week here`
+        : `about ${round1(signal.planningRate * 7)} ${unit}s a week here`
     return {
       ...base,
       risk: 'will_expire_unused',
@@ -209,14 +227,14 @@ export function batchOutlook(
     return {
       ...base,
       risk: 'will_run_out',
-      why: `about ${round1(signal.dailyRate * 7)} ${unit}s a week here — ${onHand} left runs out in ${daysToStockout} ${plural(daysToStockout, 'day')}`,
+      why: `about ${round1(signal.planningRate * 7)} ${unit}s a week here — ${onHand} left runs out in ${daysToStockout} ${plural(daysToStockout, 'day')}`,
     }
   }
 
   return {
     ...base,
     risk: 'balanced',
-    why: `about ${round1(signal.dailyRate * 7)} ${unit}s a week here — enough to last`,
+    why: `about ${round1(signal.planningRate * 7)} ${unit}s a week here — enough to last`,
   }
 }
 
@@ -226,4 +244,63 @@ function round1(n: number): number {
 
 function plural(n: number, word: string): string {
   return n === 1 ? word : `${word}s`
+}
+
+/**
+ * Outlooks for every batch a clinic holds of one drug, sharing one rate.
+ *
+ * Applying the clinic's rate to each batch independently double-counts the
+ * same consumption: two 10-vial batches at 0.5/day over 30 days each look
+ * comfortably used up, when between them 5 vials are actually going in the bin.
+ * A clinic has one rate, not one per batch, and the demand has to be shared out.
+ *
+ * Shared out soonest-expiry-first, which is both correct and what dispensaries
+ * genuinely do — you reach for the vial that dies first. So an earlier-expiring
+ * batch absorbs the demand, and the surplus lands on the batch that will still
+ * be sitting there afterwards, which is the one worth moving.
+ */
+export function positionOutlook(
+  batches: readonly { id: string; expiryDate: IsoDate; available: number }[],
+  signal: DemandSignal,
+  now: Date,
+  unit = 'vial',
+): BatchOutlook[] {
+  const ordered = [...batches].sort((a, b) => a.expiryDate.localeCompare(b.expiryDate))
+  let claimedByEarlierBatches = 0
+
+  return ordered.map((batch) => {
+    const solo = batchOutlook(batch, batch.available, signal, now, unit)
+
+    // Everything this clinic can get through before THIS batch expires, minus
+    // what the batches expiring before it have already spoken for.
+    const capacityByExpiry = Math.round(signal.planningRate * Math.max(0, solo.daysToExpiry))
+    const availableToThisBatch = Math.max(0, capacityByExpiry - claimedByEarlierBatches)
+    const projectedUse = Math.min(batch.available, availableToThisBatch)
+    claimedByEarlierBatches += projectedUse
+
+    const projectedWaste = Math.max(0, batch.available - projectedUse)
+    // Only skip the rewrite when NOTHING changed. `solo.projectedUse` is an
+    // uncapped, per-batch-in-isolation estimate — it can exceed `onHand`
+    // outright — so it can land on the same (zero) waste as the correctly
+    // shared value while still disagreeing on how much is actually used.
+    // Comparing waste alone let that inflated, unshared number leak out as
+    // this batch's reported projectedUse whenever the two happened to match.
+    if (projectedUse === solo.projectedUse && projectedWaste === solo.projectedWaste) return solo
+
+    return {
+      ...solo,
+      projectedUse,
+      projectedWaste,
+      risk: signal.confidence === 'none'
+        ? solo.risk
+        : projectedWaste > 0 && solo.daysToExpiry >= 0
+          ? 'will_expire_unused'
+          : solo.risk,
+      why: projectedWaste > 0 && solo.daysToExpiry >= 0 && signal.confidence !== 'none'
+        ? `other stock here is used first — ${projectedWaste} of ${batch.available} ` +
+          `likely to expire unused in ${solo.daysToExpiry} ` +
+          `${solo.daysToExpiry === 1 ? 'day' : 'days'}`
+        : solo.why,
+    }
+  })
 }

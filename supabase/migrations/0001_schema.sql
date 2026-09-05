@@ -270,6 +270,10 @@ select
                      and m.server_ts > now() - interval '90 days'
                     then -m.delta else 0 end), 0)::int as dispensed_90d,
   count(*) filter (where m.reason = 'dispensed')::int  as events,
+  -- Recent event count specifically: the surge guard needs to know whether
+  -- there were several dispensings THIS fortnight, not ever.
+  count(*) filter (where m.reason = 'dispensed'
+                    and m.server_ts > now() - interval '14 days')::int as events_14d,
   -- How long this clinic has held this drug at all — the honest denominator.
   -- A clinic three days old must not have three days extrapolated to ninety.
   greatest(0, extract(day from now() - min(m.server_ts)))::int as observed_days

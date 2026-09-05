@@ -71,9 +71,11 @@ describe('prompt injection through the worker’s own sentence', () => {
     expect(result.ok && result.fields.urgency).toBe('urgent')
   })
 
-  it('clamps a needed-by date far in the future', () => {
+  it('clamps a needed-by date far in the future to the nearest option the form offers', () => {
+    // 99999 clamps to MAX_NEEDED_BY_DAYS (30) first, then snaps to the nearest
+    // of [1, 3, 7, 14] — 30 is not itself an option the select renders.
     const result = validateProposal({ ...good, neededByDays: 99999 }, catalogue)
-    expect(result.ok && result.fields.neededByDays).toBe(30)
+    expect(result.ok && result.fields.neededByDays).toBe(14)
   })
 
   it('truncates a note long enough to be an attack rather than a note', () => {
