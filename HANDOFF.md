@@ -83,11 +83,57 @@ project), not a code problem — the code path is covered by
 - Nothing else is required. Stop here if time is genuinely tight — everything
   past this point is optional polish, not a missing deliverable.
 
-### 4. Only if time remains: the two open, genuinely optional items
+### 4. Only if real time remains: build in this order, not any other
 
-Neither blocks submission. Both are described fully below under "Open
-decisions." Do not spend deadline-critical time on either unless steps 1–3 are
-done and green.
+Nothing below blocks submission — stop after step 3 if time is tight. If
+there genuinely is time left, this is ranked by payoff-per-hour and how much
+each risks the tested core, not by how interesting it is:
+
+1. **Wire the suggestion card's receiver half to an action.** `SuggestionCard`
+   in `src/ui/Requests.tsx` already tells a clinic *"Ask Jadcherla for 19
+   vials"* with full reasoning — but tapping it does nothing today; the
+   worker still has to separately open "Ask for medicine" and retype the same
+   drug/qty by hand. Wire a button straight to the **existing, already-tested
+   `create_request` RPC** (`supabase/migrations/0002_functions.sql`),
+   pre-filled from the suggestion's fields. Small, low-risk, reuses tested
+   plumbing, and it's a direct hit on judging criterion #1 ("simplicity and
+   speed of the... workflow").
+2. **Then, only if #1 is done and verified: give the sender half the same
+   treatment.** The same card's outgoing half says *"Post this as an offer"*
+   — but **no RPC exists today that lets a user create an unsolicited
+   `proposed` transfer.** Every `proposed` row in the app right now comes
+   from `supabase/seed.sql`, none from a user action. This needs a new
+   `propose_transfer` RPC (simple insert — not contested, so none of
+   `accept_transfer`'s locking complexity applies), an RLS grant for it, a
+   couple of SQL tests, then wiring the button. Bigger than #1, but still
+   additive: once the row exists, the entire accept/dispatch/handoff state
+   machine already handles it unchanged. Do not start this without also
+   adding the SQL tests — an unlocked insert path into `transfers` is exactly
+   the kind of surface `supabase/tests/rls_test.sql`'s hostile probes exist
+   to cover, and a new RPC that isn't probed the same way is a real gap, not
+   a shortcut.
+3. **Telugu strings for the static UI — real, but bigger and riskier than
+   1–2, do it last if at all.** The natural-language intake feature already
+   *accepts* Telugu speech (`docs/ai-design.md`); every other screen is
+   English-only. `MEMO.md` names this the #2 regret in its own words. There
+   is no i18n scaffold in the codebase yet and copy is scattered across
+   roughly 1,500 lines of `src/ui/*.tsx`, not centralized — this is genuine,
+   multi-file work, not a quick win, and it touches every screen right
+   before a deadline. Worth doing eventually; not the thing to reach for
+   with only hours left.
+
+**Do not build these, even though `MEMO.md`'s "cut with real regret" section
+mentions them** — they read like unfinished business but are actually
+contradicted by the brief, not just deferred:
+- **Push notifications** — `CLAUDE.md` §9 lists this as explicitly out of
+  scope, and the brief separately bans SMS/IVR outright.
+- **Per-worker identity / role hierarchy** — the brief's constraints ask
+  specifically for "lightweight clinic PIN identification," and §9 lists
+  "role hierarchies beyond clinic-level access" as out of scope. The memo's
+  regret about this is forward-looking commentary about what a real
+  multi-district pilot would need, not a to-do for this submission.
+- Anything else in the §9 list generally (maps/routing, photo uploads,
+  admin analytics, temperature-sensor integration, inter-clinic payment).
 
 ---
 
