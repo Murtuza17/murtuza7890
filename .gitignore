@@ -26,3 +26,6 @@ dist-ssr
 # local env
 .env
 .env.local
+
+# local postgres scratch
+/tmp/vetswap-*
