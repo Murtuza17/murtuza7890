@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { humanizeAge } from '../domain/expiry'
+import { t, type Lang } from '../domain/i18n'
 import type { OutboxItem } from '../domain/outbox'
 import type { Transfer } from '../domain/types'
 import { enqueue } from '../data/sync'
@@ -25,8 +26,10 @@ const STATUS: Record<Transfer['status'], { label: string; icon: string; cls: str
 }
 
 export function Transfers({
-  model, session, now, outbox,
-}: { model: BoardModel; session: Session; now: Date; outbox: readonly OutboxItem[] }) {
+  model, session, now, outbox, lang = 'en',
+}: {
+  model: BoardModel; session: Session; now: Date; outbox: readonly OutboxItem[]; lang?: Lang
+}) {
   const [open, setOpen] = useState<string | null>(null)
 
   const mine = model.transfers.filter(
@@ -47,13 +50,13 @@ export function Transfers({
 
   return (
     <>
-      {live.length > 0 ? <div className="section-title">Needs attention</div> : null}
+      {live.length > 0 ? <div className="section-title">{t('needsAttention', lang)}</div> : null}
       {live.map((t) => (
         <TransferCard key={t.id} transfer={t} model={model} session={session} now={now}
                       onOpen={() => setOpen(t.id)} />
       ))}
 
-      {done.length > 0 ? <div className="section-title">Finished</div> : null}
+      {done.length > 0 ? <div className="section-title">{t('finished', lang)}</div> : null}
       {done.map((t) => (
         <TransferCard key={t.id} transfer={t} model={model} session={session} now={now}
                       onOpen={() => setOpen(t.id)} />

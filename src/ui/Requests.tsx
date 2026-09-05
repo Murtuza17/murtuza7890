@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { findMatches, formatKm, planFulfilment, type Match } from '../domain/matching'
 import { anticipateTransfers, bestPerNeed, type AnticipatedTransfer } from '../domain/anticipate'
 import { humanizeExpiry } from '../domain/expiry'
+import { t, type Lang } from '../domain/i18n'
 import { enqueue } from '../data/sync'
 import { parseRequestText } from '../data/intake'
 import type { OutboxItem } from '../domain/outbox'
@@ -21,8 +22,10 @@ const URGENCY: Record<StockRequest['urgency'], { label: string; icon: string; cl
  * can fill them.
  */
 export function Requests({
-  model, session, now, outbox,
-}: { model: BoardModel; session: Session; now: Date; outbox: readonly OutboxItem[] }) {
+  model, session, now, outbox, lang = 'en',
+}: {
+  model: BoardModel; session: Session; now: Date; outbox: readonly OutboxItem[]; lang?: Lang
+}) {
   const [open, setOpen] = useState<string | null>(null)
   const [posting, setPosting] = useState(false)
 
@@ -55,7 +58,7 @@ export function Requests({
         <div className="card left-rule band-expired" style={{ marginBottom: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span className="pill band-expired" style={{ padding: '2px 8px' }}>
-              <span className="pill-icon" aria-hidden="true">!!</span>Outbreak Alert
+              <span className="pill-icon" aria-hidden="true">!!</span>{t('outbreakAlert', lang)}
             </span>
             <span style={{ fontSize: 13, color: 'var(--ink-soft)' }}>
               Usage surge detected in district
@@ -88,13 +91,13 @@ export function Requests({
       ) : null}
 
       <button className="btn" onClick={() => setPosting(true)} style={{ marginTop: 0 }}>
-        Ask for medicine
+        {t('askForMedicine', lang)}
       </button>
 
       {suggestions.length > 0 ? (
         <>
           <div className="section-title">
-            Worth doing now · predicted from your own usage
+            {t('worthDoingNow', lang)}
           </div>
           {suggestions.map((s) => (
             <SuggestionCard
@@ -109,7 +112,7 @@ export function Requests({
         </>
       ) : null}
 
-      <div className="section-title">Your requests</div>
+      <div className="section-title">{t('yourRequests', lang)}</div>
       {mine.length === 0 ? (
         <Empty title="You have not asked for anything">
           Post a shortage and nearby dispensaries holding that medicine will appear here.
@@ -120,7 +123,7 @@ export function Requests({
         ))
       )}
 
-      <div className="section-title">Other villages need</div>
+      <div className="section-title">{t('otherVillagesNeed', lang)}</div>
       {others.length === 0 ? (
         <Empty title="No open shortages nearby">
           Nothing is being asked for right now across the district.
@@ -137,7 +140,7 @@ export function Requests({
       ) : null}
 
       {posting ? (
-        <PostSheet model={model} onClose={() => setPosting(false)} />
+        <PostSheet model={model} lang={lang} onClose={() => setPosting(false)} />
       ) : null}
     </>
   )
@@ -438,7 +441,7 @@ function ClaimButton({
   )
 }
 
-function PostSheet({ model, onClose }: { model: BoardModel; onClose: () => void }) {
+function PostSheet({ model, lang = 'en', onClose }: { model: BoardModel; lang?: Lang; onClose: () => void }) {
   const [drugId, setDrugId] = useState('')
   const [qty, setQty] = useState('')
   const [urgency, setUrgency] = useState<StockRequest['urgency']>('urgent')
@@ -475,7 +478,7 @@ function PostSheet({ model, onClose }: { model: BoardModel; onClose: () => void 
 
     try {
       const recognition = new SpeechAPI()
-      recognition.lang = 'en-IN'
+      recognition.lang = lang === 'te' ? 'te-IN' : lang === 'hi' ? 'hi-IN' : 'en-IN'
       recognition.interimResults = false
       recognition.maxAlternatives = 1
 
@@ -549,7 +552,7 @@ function PostSheet({ model, onClose }: { model: BoardModel; onClose: () => void 
   }
 
   return (
-    <Sheet title="Ask for medicine" onClose={onClose}>
+    <Sheet title={t('askForMedicine', lang)} onClose={onClose}>
       <div className="field">
         <label htmlFor="say">
           Say what you need <span className="hint">English or Telugu · optional</span>
@@ -566,7 +569,7 @@ function PostSheet({ model, onClose }: { model: BoardModel; onClose: () => void 
             style={{ flex: 1 }}
             onClick={() => void parseSentence()}
           >
-            {parsing ? 'Reading…' : 'Fill this in for me'}
+            {parsing ? 'Reading…' : t('fillInForMe', lang)}
           </button>
           <button
             type="button"
@@ -574,7 +577,7 @@ function PostSheet({ model, onClose }: { model: BoardModel; onClose: () => void 
             style={{ minWidth: 110, flexShrink: 0 }}
             onClick={startListening}
           >
-            {listening ? 'Listening…' : '🎙️ Dictate'}
+            {listening ? t('listening', lang) : `🎙️ ${t('dictate', lang)}`}
           </button>
         </div>
         {intakeNote ? (

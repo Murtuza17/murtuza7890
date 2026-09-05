@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { login, type Session } from '../data/session'
+import { LANG_LABELS, type Lang } from '../domain/i18n'
 import { Note } from './bits'
 
 /**
@@ -8,7 +9,13 @@ import { Note } from './bits'
  * The demo credentials are on screen on purpose: a judge opening this cold
  * should not have to go hunting in a README for a PIN.
  */
-export function Login({ onSignedIn }: { onSignedIn: (session: Session) => void }) {
+export function Login({
+  onSignedIn, lang = 'en', onLangChange,
+}: {
+  onSignedIn: (session: Session) => void
+  lang?: Lang
+  onLangChange?: (l: Lang) => void
+}) {
   const [code, setCode] = useState('')
   const [pin, setPin] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -40,6 +47,30 @@ export function Login({ onSignedIn }: { onSignedIn: (session: Session) => void }
           <div className="topbar-clinic">Medicine Swap Board</div>
           <div className="topbar-village">Veterinary dispensaries · Mahabubnagar</div>
         </div>
+        <div className="topbar-spacer" />
+        {onLangChange ? (
+          <div style={{ display: 'flex', gap: 4 }}>
+            {(['en', 'te', 'hi'] as const).map((l) => (
+              <button
+                key={l}
+                type="button"
+                style={{
+                  background: lang === l ? 'rgba(255,255,255,0.25)' : 'transparent',
+                  border: '1px solid rgba(255,255,255,0.3)',
+                  color: '#fff',
+                  borderRadius: 4,
+                  padding: '3px 7px',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                  fontWeight: lang === l ? 700 : 400,
+                }}
+                onClick={() => onLangChange(l)}
+              >
+                {LANG_LABELS[l].code}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
       <main>
         <form className="card" onSubmit={submit}>
