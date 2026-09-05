@@ -452,9 +452,48 @@ function PostSheet({ model, onClose }: { model: BoardModel; onClose: () => void 
   // simply fails. See src/data/intake.ts.
   const [sentence, setSentence] = useState('')
   const [parsing, setParsing] = useState(false)
+  const [listening, setListening] = useState(false)
+  const [speechSupported] = useState(() =>
+    typeof window !== 'undefined' &&
+    ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window),
+  )
   const [intakeNote, setIntakeNote] = useState<
     { kind: 'error' | 'warn' | 'info'; text: string } | null
   >(null)
+
+  function startListening() {
+    if (!speechSupported) return
+    const SpeechAPI =
+      (window as unknown as { SpeechRecognition?: new () => any; webkitSpeechRecognition?: new () => any })
+        .SpeechRecognition ||
+      (window as unknown as { webkitSpeechRecognition?: new () => any }).webkitSpeechRecognition
+
+    if (!SpeechAPI) return
+
+    try {
+      const recognition = new SpeechAPI()
+      recognition.lang = 'en-IN'
+      recognition.interimResults = false
+      recognition.maxAlternatives = 1
+
+      recognition.onstart = () => setListening(true)
+      recognition.onend = () => setListening(false)
+      recognition.onerror = () => setListening(false)
+
+      recognition.onresult = (event: { results?: { [index: number]: { [index: number]: { transcript: string } } } }) => {
+        const transcript = event.results?.[0]?.[0]?.transcript
+        if (transcript) {
+          setSentence(transcript)
+          setIntakeNote({ kind: 'info', text: `Heard: “${transcript}” — tap Fill this in for me.` })
+        }
+        setListening(false)
+      }
+
+      recognition.start()
+    } catch {
+      setListening(false)
+    }
+  }
 
   const n = Number(qty)
   const valid = drugId !== '' && Number.isInteger(n) && n > 0
@@ -509,12 +548,26 @@ function PostSheet({ model, onClose }: { model: BoardModel; onClose: () => void 
           placeholder="20 vials FMD vaccine, two herds down at Peddapur"
           onChange={(e) => setSentence(e.target.value)}
         />
-        <button
-          className="btn btn-quiet" disabled={parsing || sentence.trim() === ''}
-          onClick={() => void parseSentence()}
-        >
-          {parsing ? 'Reading…' : 'Fill this in for me'}
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            type="button"
+            className="btn btn-quiet" disabled={parsing || sentence.trim() === ''}
+            style={{ flex: 1 }}
+            onClick={() => void parseSentence()}
+          >
+            {parsing ? 'Reading…' : 'Fill this in for me'}
+          </button>
+          {speechSupported ? (
+            <button
+              type="button"
+              className={`btn btn-quiet ${listening ? 'band-critical' : ''}`}
+              style={{ minWidth: 105, flexShrink: 0 }}
+              onClick={startListening}
+            >
+              {listening ? 'Listening…' : '🎙️ Dictate'}
+            </button>
+          ) : null}
+        </div>
         {intakeNote ? (
           <Note kind={intakeNote.kind === 'error' ? 'error' : intakeNote.kind === 'warn' ? 'warn' : 'info'}>
             {intakeNote.text}
