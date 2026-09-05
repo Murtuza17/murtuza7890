@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { findMatches, formatKm, haversineKm, planFulfilment, type MatchInput } from './matching'
-import type { Batch, Clinic, Drug, StockMovement, StockRequest } from './types'
+import type { Batch, Clinic, Drug, StockRequest } from './types'
 
 const now = new Date('2026-09-05T10:00:00.000Z')
 
@@ -41,20 +41,18 @@ const request = (over: Partial<StockRequest> = {}): StockRequest => ({
   createdAt: '2026-09-05T09:00:00.000Z', ...over,
 })
 
-const stock = (batchId: string, qty: number): StockMovement[] => [{
-  id: `m-${batchId}`, batchId, delta: qty, reason: 'received', actorClinicId: 'c1',
-  clientId: `c-${batchId}`, clientTs: '2026-09-01T00:00:00.000Z',
-  serverTs: '2026-09-01T00:00:00.000Z',
-}]
-
+/**
+ * availableByBatch comes from the server's own SUM(delta) view in production
+ * (supabase's `batch_stock`) — see matching.ts's MatchInput doc for why the
+ * fixtures here go straight to the number rather than a fake movement list
+ * that findMatches would then have to re-derive it from.
+ */
 function input(over: Partial<MatchInput> & { batches: readonly Batch[] }): MatchInput {
-  const movements = new Map<string, readonly StockMovement[]>(
-    over.batches.map((b) => [b.id, stock(b.id, 20)]),
-  )
+  const available = new Map<string, number>(over.batches.map((b) => [b.id, 20]))
   return {
     request: request(), requestingClinic: HUB, drug: FMD,
     clinicsById: new Map([HUB, NEAR, FAR].map((c) => [c.id, c])),
-    movementsByBatch: movements, now, ...over,
+    availableByBatch: available, now, ...over,
   }
 }
 
@@ -75,6 +73,31 @@ describe('haversine', () => {
   it('formats for a small screen', () => {
     expect(formatKm(8.42)).toBe('8.4 km')
     expect(formatKm(23.6)).toBe('24 km')
+  })
+})
+
+describe('availability is server truth, not recomputed from a raw ledger', () => {
+  /**
+   * The board's own movement fetch is capped at 500 rows across the whole
+   * board (fetchBoard, src/data/supabase.ts). Recomputing availability from
+   * that inside matching used to mean a batch whose defining "received" row
+   * aged out of the window — while later dispenses stayed in it — would
+   * compute near-zero here and get silently dropped before the request
+   * screen's own correction against the server view ever ran. A real,
+   * available match would never appear on the requester's board.
+   *
+   * availableByBatch always comes straight from the server's SUM(delta) view,
+   * so this can no longer happen — proven here by a batch with a genuinely
+   * healthy quantity and NO backing movements at all, the worst case the old
+   * code could hit.
+   */
+  it('surfaces a match backed by zero local movement rows', () => {
+    const out = findMatches(input({
+      batches: [batch({ id: 'b1' })],
+      availableByBatch: new Map([['b1', 20]]),
+    }))
+    expect(out.matches).toHaveLength(1)
+    expect(out.matches[0]?.availableQty).toBe(20)
   })
 })
 
@@ -104,12 +127,21 @@ describe('filtering', () => {
   })
 
   it('excludes stock that is fully reserved to someone else', () => {
-    const out = findMatches(input({ batches: [batch({ id: 'b1', qtyReserved: 20 })] }))
+    // qty_reserved is already netted out of availableByBatch by the caller
+    // (in production, the server's batch_stock view) before matching ever
+    // sees it — matching itself no longer knows or cares about reservations.
+    const out = findMatches(input({
+      batches: [batch({ id: 'b1' })],
+      availableByBatch: new Map([['b1', 0]]),
+    }))
     expect(out.excluded[0]?.reason).toBe('no_available_stock')
   })
 
   it('offers only the unreserved remainder', () => {
-    const out = findMatches(input({ batches: [batch({ id: 'b1', qtyReserved: 14 })] }))
+    const out = findMatches(input({
+      batches: [batch({ id: 'b1' })],
+      availableByBatch: new Map([['b1', 6]]),
+    }))
     expect(out.matches[0]?.availableQty).toBe(6)
   })
 
@@ -157,7 +189,7 @@ describe('ranking', () => {
     const batches = [batch({ id: 'b-small' }), batch({ id: 'b-big' })]
     const out = findMatches(input({
       batches,
-      movementsByBatch: new Map([['b-small', stock('b-small', 5)], ['b-big', stock('b-big', 30)]]),
+      availableByBatch: new Map([['b-small', 5], ['b-big', 30]]),
     }))
     expect(out.matches.map((m) => m.batchId)).toEqual(['b-big', 'b-small'])
   })
@@ -232,7 +264,7 @@ describe('partial fulfilment across clinics', () => {
     const out = findMatches(input({
       request: request({ qtyNeeded: 20 }),
       batches,
-      movementsByBatch: new Map([['b-12', stock('b-12', 12)], ['b-8', stock('b-8', 8)]]),
+      availableByBatch: new Map([['b-12', 12], ['b-8', 8]]),
     }))
     const plan = planFulfilment(request({ qtyNeeded: 20 }), out.matches)
     expect(plan.complete).toBe(true)

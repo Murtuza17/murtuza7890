@@ -230,7 +230,7 @@ end $$;
 do $$
 declare
   v_batch uuid; v_from uuid; v_to uuid; v_transfer uuid;
-  v_tok_from uuid; v_tok_to uuid; r jsonb; v_note text;
+  v_tok_from uuid; v_tok_to uuid; r jsonb; v_note text; v_reserved int;
 begin
   v_batch := _batch('BQ-5510');
   select clinic_id into v_from from batches where id = v_batch;
@@ -243,6 +243,10 @@ begin
   v_tok_to   := _token('MBNR','1234');
 
   perform accept_transfer(v_tok_to, v_transfer, gen_random_uuid());
+  perform _assert(
+    (select qty_reserved from batches where id = v_batch) = 5,
+    'accepting reserves the 5 vials'
+  );
   perform dispatch_transfer(v_tok_from, v_transfer, gen_random_uuid());
 
   r := confirm_handoff(v_tok_from, v_transfer, 'sender', '000000', gen_random_uuid());
@@ -250,6 +254,15 @@ begin
 
   select dispute_note into v_note from transfers where id = v_transfer;
   perform _assert(v_note like '%000000%', 'the trail records what was actually reported');
+
+  -- The bug this guards against: disputed is terminal and nothing ever
+  -- revisits it, so a reservation left standing here is stuck forever — not
+  -- on the sender's countable shelf, not confirmed as the receiver's, just
+  -- permanently missing from both. Found by an independent review pass, not
+  -- by the original test suite.
+  select qty_reserved into v_reserved from batches where id = v_batch;
+  perform _assert(v_reserved = 0,
+    'a dispute releases the reservation — it must not be held forever with no path back');
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -412,6 +425,18 @@ begin
   perform _assert(
     (select qty_reserved from batches where id = v_batch) = 6,
     'exactly 6 vials are reserved'
+  );
+
+  -- claim_from_match's OWN idempotency check, not the transfer-insert
+  -- UNIQUE constraint or accept_transfer's already-accepted branch that were
+  -- silently doing this job for it. Found by an independent review: the
+  -- check at the top of claim_from_match looked up rpc_results by
+  -- p_client_id, but nothing on that path ever wrote a row under that key —
+  -- always a miss, dead code that happened to be safe only because of the
+  -- other two safety nets.
+  perform _assert(
+    exists (select 1 from rpc_results where client_id = v_client and operation = 'claim_from_match'),
+    'the retry is recorded under claim_from_match''s own client_id, not just accept_transfer''s'
   );
 end $$;
 

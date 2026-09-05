@@ -8,9 +8,8 @@
  * someone 30 km on a motorbike cannot act on an opaque score.
  */
 
-import { available } from './ledger'
 import { daysUntilExpiry, humanizeExpiry, isExpired } from './expiry'
-import type { Batch, Clinic, Drug, StockMovement, StockRequest } from './types'
+import type { Batch, Clinic, Drug, StockRequest } from './types'
 
 const EARTH_RADIUS_KM = 6371
 
@@ -83,7 +82,23 @@ export interface MatchInput {
   readonly drug: Drug
   readonly batches: readonly Batch[]
   readonly clinicsById: ReadonlyMap<string, Clinic>
-  readonly movementsByBatch: ReadonlyMap<string, readonly StockMovement[]>
+  /**
+   * Available quantity per batch, from the server's own SUM(delta) view
+   * (`batch_stock` — see supabase/migrations/0001_schema.sql), not recomputed
+   * here from a raw movement list.
+   *
+   * DEVIATION, flagged: an earlier version took `movementsByBatch` and called
+   * `ledger.available()` internally. That broke silently once the board's
+   * movement fetch was capped (`fetchBoard` limits to the 500 most recent
+   * across the WHOLE board, src/data/supabase.ts) — a batch whose defining
+   * "+40 received" row aged out of that window while later dispenses stayed
+   * in it would compute near-zero here and get dropped by the `no_available_stock`
+   * filter below, before ever reaching the correction Requests.tsx used to
+   * apply afterward. A real, available match would silently never appear on
+   * the requester's board. Taking the number directly removes the second,
+   * inconsistent computation rather than papering over it downstream.
+   */
+  readonly availableByBatch: ReadonlyMap<string, number>
   readonly now: Date
 }
 
@@ -104,7 +119,7 @@ export interface MatchOutput {
  * includes what the worker sees.
  */
 export function findMatches(input: MatchInput): MatchOutput {
-  const { request, requestingClinic, drug, batches, clinicsById, movementsByBatch, now } = input
+  const { request, requestingClinic, drug, batches, clinicsById, availableByBatch, now } = input
   const matches: Match[] = []
   const excluded: Excluded[] = []
 
@@ -139,7 +154,7 @@ export function findMatches(input: MatchInput): MatchOutput {
       continue
     }
 
-    const availableQty = available(batch, movementsByBatch.get(batch.id) ?? [])
+    const availableQty = availableByBatch.get(batch.id) ?? 0
     if (availableQty <= 0) {
       drop('no_available_stock')
       continue

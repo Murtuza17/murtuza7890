@@ -29,6 +29,14 @@ async function signIn(code, pin) {
   await page.fill('#pin', pin)
   await page.click('button:has-text("Sign in")')
   await page.waitForSelector('.tabs', { timeout: 15000 })
+  // `.tabs` renders the instant `session` state is set — the async board
+  // fetch that actually populates the stock/requests/transfers cards runs
+  // afterward, on its own hydrate() effect. Racing a content check straight
+  // off this call reads the "still loading" gap: empty main, so "no NaN"
+  // trivially passes over nothing, "expires in N days" matches nothing, and
+  // the band-differentiation check sees an empty set. Wait for the first real
+  // card (a batch, a request, or an empty state) rather than guess a delay.
+  await page.waitForSelector('.card, .empty', { timeout: 15000 })
   return { ctx, page, errors }
 }
 
@@ -223,6 +231,32 @@ console.log('== audit trail is read from the event log ==')
   ok(/Offered by/.test(trail), 'the trail starts with the offer', trail.slice(0, 100))
   ok(!/not yet/.test(trail) || /Claimed|Refused|Left/.test(trail),
      'and shows real logged events, not placeholder rows')
+  await ctx.close()
+}
+
+console.log('')
+console.log('== a correction can add stock back, not just remove it ==')
+{
+  // Found by review: the submit handler sent -n for every reason including
+  // 'correction', so an undercount could never actually be added back —
+  // despite the UI's own copy claiming corrections go either way.
+  const { ctx, page } = await signIn('DVKD', '4567')
+  const before = await page.locator('.card').first().locator('.qty-n').innerText()
+
+  await page.locator('.card').first().locator('button:has-text("Record use")').click()
+  await page.waitForSelector('.sheet')
+  await page.selectOption('#reason', 'correction')
+  ok(await page.locator('button:has-text("Shelf has more")').isVisible(),
+     'choosing a direction is offered once Correcting a count is selected')
+
+  await page.click('button:has-text("Shelf has more")')
+  await page.fill('#qty', '3')
+  await page.click('.sheet button:has-text("Record 3")')
+  await page.waitForTimeout(2500)
+
+  const after = await page.locator('.card').first().locator('.qty-n').innerText()
+  ok(Number(after) === Number(before) + 3,
+     'a "shelf has more" correction increases on-hand', `${before} -> ${after}`)
   await ctx.close()
 }
 

@@ -521,6 +521,18 @@ begin
                                        else receiver_confirmed_code end
     where id = p_transfer_id;
 
+    -- Release, don't hold. disputed is terminal and nothing ever revisits it
+    -- (sweep_expired_reservations only matches status='accepted') — leaving
+    -- qty_reserved untouched here means these vials are permanently
+    -- uncountable on this batch, understating real stock to every future
+    -- claim with no way back. Which clinic physically holds the vials is
+    -- genuinely unknown (that is what "disputed" means), so this does not
+    -- move stock between ledgers; a phone call between the two clinics,
+    -- recorded afterward as a `correction` movement on whichever shelf
+    -- turns out to hold them, is how the physical reality gets reconciled.
+    update batches set qty_reserved = greatest(0, qty_reserved - v_transfer.qty)
+    where id = v_batch_id;
+
     insert into events (entity_type, entity_id, type, actor_clinic_id, payload, client_ts)
     values ('transfer', p_transfer_id, 'transfer_disputed', v_clinic,
             jsonb_build_object('side', p_side, 'reported', p_code, 'expected', v_expected),
@@ -740,7 +752,7 @@ create or replace function public.claim_from_match(
 ) returns jsonb
 language plpgsql security definer set search_path = public, extensions
 as $$
-declare v_clinic uuid; v_holder uuid; v_transfer uuid; v_existing jsonb;
+declare v_clinic uuid; v_holder uuid; v_transfer uuid; v_existing jsonb; v_result jsonb;
 begin
   select result into v_existing from rpc_results where client_id = p_client_id;
   if found then return v_existing; end if;
@@ -763,8 +775,24 @@ begin
     select id into v_transfer from transfers where client_id = p_client_id;
   end if;
 
-  -- A distinct idempotency key: this call's own key already guards the insert.
-  return public.accept_transfer(p_token, v_transfer, gen_random_uuid());
+  -- accept_transfer gets a freshly generated key here — a distinct call each
+  -- time this function runs — and stays safe on retry via its OWN status
+  -- check (an already-'accepted' transfer returns its existing codes rather
+  -- than re-running). That does not make the check at the TOP of this
+  -- function ever fire, though: nothing was ever written to rpc_results under
+  -- p_client_id for it to find, so it always missed and looked like working
+  -- idempotency protection while doing nothing. Writing the result below,
+  -- once, under the key this function actually received is what makes a
+  -- genuine retry — the same outbox item drained twice, e.g. from two tabs of
+  -- the same clinic sharing one IndexedDB queue — short-circuit here next
+  -- time, matching the pattern every other RPC in this file follows.
+  v_result := public.accept_transfer(p_token, v_transfer, gen_random_uuid());
+
+  insert into rpc_results (client_id, operation, result)
+  values (p_client_id, 'claim_from_match', v_result)
+  on conflict (client_id) do nothing;
+
+  return v_result;
 end $$;
 
 -- ---------------------------------------------------------------------------

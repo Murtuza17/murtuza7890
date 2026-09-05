@@ -226,7 +226,14 @@ function TransferSheet({
             <Note kind="warn">
               This records {transfer.qty} {drug?.unit ?? 'vial'}s as leaving your shelf now.
             </Note>
-            <button className="btn" disabled={busy}
+            {/* Guarded by `queued`, not just `busy`: `busy` clears the instant
+                the action is written to IndexedDB, well before it syncs. Without
+                this a worker who reopens the sheet while offline can queue a
+                second dispatch_transfer for the same transfer — the first
+                succeeds on drain, the second then hits the server's own
+                wrong_state check and surfaces as a spurious "not accepted"
+                error over an action that in fact already worked. */}
+            <button className="btn" disabled={busy || Boolean(queued)}
                     onClick={async () => {
                       setBusy(true)
                       await enqueue('dispatch_transfer', {
@@ -256,7 +263,7 @@ function TransferSheet({
                    onChange={(e) => setEntered(e.target.value.replace(/\D/g, ''))} />
           </div>
           <button
-            className="btn" disabled={entered.length !== 6 || busy}
+            className="btn" disabled={entered.length !== 6 || busy || Boolean(queued)}
             onClick={async () => {
               setBusy(true)
               await enqueue('confirm_handoff', {
@@ -278,7 +285,7 @@ function TransferSheet({
       {/* Only the claiming clinic can give the stock back. */}
       {!outgoing && transfer.status === 'accepted' ? (
         <button
-          className="btn btn-danger" disabled={busy}
+          className="btn btn-danger" disabled={busy || Boolean(queued)}
           onClick={async () => {
             setBusy(true)
             await enqueue('cancel_transfer', { p_transfer_id: transfer.id, p_note: '' })

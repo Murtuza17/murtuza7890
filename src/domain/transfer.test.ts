@@ -133,6 +133,18 @@ describe('roadside handoff reconciliation', () => {
     expect(res.ok && res.state.disputeNote).toContain('000000')
   })
 
+  it('releases the reservation on dispute — disputed is terminal and nothing ever revisits it', () => {
+    // Without this the 4 vials are permanently uncountable: not on the
+    // sender's shelf, not confirmed on the receiver's, and no later state
+    // (there is none — disputed is terminal) ever frees them again.
+    const res = reduce(
+      inTransit(),
+      { type: 'confirm', at: '2026-09-05T12:00:00.000Z', side: 'sender', code: '000000' },
+      ctx,
+    )
+    expect(res.ok && res.emits).toContainEqual({ kind: 'release', batchId: 'b1', qty: 4 })
+  })
+
   it('requires each side to report the OTHER side’s code', () => {
     // Echoing your own code proves only that you can read your own screen.
     const res = reduce(

@@ -222,7 +222,15 @@ export function reduce(
       return {
         ok: true,
         state: { ...state, status: 'disputed', disputeNote: event.note },
-        emits: [{ kind: 'event', type: 'transfer_disputed', payload: { note: event.note } }],
+        // disputed is terminal (isTerminal), so this is the last chance to
+        // release the reservation. Leaving it held forever after a dispute
+        // that can never resolve itself is a stock leak: the vials become
+        // permanently uncountable, understating this clinic's true stock to
+        // every future match and claim with no way back.
+        emits: [
+          { kind: 'release', batchId: ctx.batchId, qty: ctx.qty },
+          { kind: 'event', type: 'transfer_disputed', payload: { note: event.note } },
+        ],
       }
     }
   }
@@ -267,7 +275,17 @@ function confirm(
           ? { senderConfirmedCode: event.code }
           : { receiverConfirmedCode: event.code }),
       },
+      // Release, don't hold. disputed is terminal — there is no later state
+      // that will ever release this reservation otherwise. Which clinic
+      // physically has the vials is genuinely unknown at this point (that is
+      // what "disputed" means), so this does not attempt to move stock
+      // between ledgers; it only frees the number so it stops being
+      // double-counted as both "on this clinic's shelf" and "promised
+      // elsewhere" forever. Reconciling where the vials actually ended up is
+      // a phone call between the two clinics, recorded afterward as a
+      // `correction` movement on whichever shelf turns out to hold them.
       emits: [
+        { kind: 'release', batchId: ctx.batchId, qty: ctx.qty },
         {
           kind: 'event',
           type: 'transfer_disputed',

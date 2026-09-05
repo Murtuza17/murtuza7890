@@ -128,20 +128,19 @@ function MatchSheet({
 
   if (!drug || !requestingClinic) return null
 
+  // availableByBatch is the server's own SUM(delta) view, not a possibly-
+  // truncated local movement list — see matching.ts's MatchInput doc. Passed
+  // straight in, rather than corrected after the fact: a batch this excludes
+  // for lacking stock must never have been considered available in the first
+  // place, which a post-hoc correction here could not undo once findMatches
+  // had already dropped it.
   const { matches, excluded } = findMatches({
     request, requestingClinic, drug,
     batches: model.batches, clinicsById: model.clinicsById,
-    movementsByBatch: model.movementsByBatch, now,
+    availableByBatch: model.availableByBatch, now,
   })
 
-  // Availability comes from the server view, not from the truncated movement
-  // list the board happened to fetch.
-  const corrected: Match[] = matches.map((m) => {
-    const available = model.availableByBatch.get(m.batchId) ?? m.availableQty
-    return { ...m, availableQty: available, qtyOffered: Math.min(available, request.qtyNeeded) }
-  }).filter((m) => m.availableQty > 0)
-
-  const plan = planFulfilment(request, corrected)
+  const plan = planFulfilment(request, matches)
   const isMine = request.clinicId === session.clinic.id
   const coldChainDropped = excluded.filter((e) => e.reason === 'cold_chain_broken').length
 
@@ -151,7 +150,7 @@ function MatchSheet({
       subtitle={`Needed by ${request.neededBy} · within ${request.radiusKm} km`}
       onClose={onClose}
     >
-      {corrected.length === 0 ? (
+      {matches.length === 0 ? (
         <Empty title="Nothing available within that distance">
           Try again with a wider radius, or ask the district office.
         </Empty>
@@ -170,7 +169,7 @@ function MatchSheet({
             </Note>
           )}
 
-          {corrected.map((m) => (
+          {matches.map((m) => (
             <div key={m.batchId} className="card" style={{ marginTop: 12 }}>
               <div className="card-title">{m.clinicName}</div>
               <div className="card-sub">{m.village} · batch {m.batchNo}</div>

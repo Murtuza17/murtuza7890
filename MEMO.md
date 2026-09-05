@@ -97,6 +97,16 @@ both boards.** A receiver's phone dying on the road must not fabricate a
 completion, and must not write off a real handoff. "Waiting for the other side" is
 the only honest answer.
 
+A dispute also releases the reservation. `disputed` is terminal — nothing ever
+revisits it the way the TTL sweep revisits `accepted` — so a version of this that
+held the reservation on mismatch would hold it forever, quietly understating that
+clinic's real stock to every future match with no path back. Which clinic
+physically has the vials is genuinely unknown at that point; releasing the number
+doesn't move stock between ledgers, it only stops double-counting it as both
+"on this shelf" and "promised elsewhere." Reconciling where the vials actually
+ended up is a phone call, recorded afterward as a `correction` movement on
+whichever shelf turns out to hold them.
+
 **Reservations expire after 24 hours**, swept lazily on read — no cron, no paid
 scheduler. Without it a clinic freezes scarce antivenom by claiming it and going
 quiet. The sweep runs *inside* the claim lock and *before* the availability
