@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { bandFor } from '../domain/expiry'
 import { validateMovement } from '../domain/ledger'
+import { batchOutlook } from '../domain/forecast'
 import { enqueue } from '../data/sync'
 import type { Session } from '../data/session'
 import type { Batch, MovementReason, StockMovement } from '../domain/types'
@@ -24,6 +25,18 @@ export function Inventory({
     .filter((b) => b.clinicId === session.clinic.id)
     .sort((a, b) => a.expiryDate.localeCompare(b.expiryDate))
 
+  // Calculate forecast outlook for own batches to identify projected waste
+  const atRiskBatches = mine.map((b) => {
+    const d = model.drugsById.get(b.drugId)
+    const onHand = model.onHandByBatch.get(b.id) ?? 0
+    const signal = model.signalByClinicDrug.get(`${b.clinicId}:${b.drugId}`)
+    const outlook = signal ? batchOutlook(b, onHand, signal, now, d?.unit ?? 'vial') : null
+    return { batchId: b.id, outlook }
+  }).filter((x) => x.outlook?.risk === 'will_expire_unused' && (x.outlook.projectedWaste ?? 0) > 0)
+
+  const atRiskMap = new Map(atRiskBatches.map((x) => [x.batchId, x.outlook!]))
+  const totalWasteVials = atRiskBatches.reduce((acc, x) => acc + (x.outlook?.projectedWaste ?? 0), 0)
+
   const batch = logging ? model.batchesById.get(logging) : undefined
   const drug = batch ? model.drugsById.get(batch.drugId) : undefined
 
@@ -44,6 +57,25 @@ export function Inventory({
       <button className="btn" style={{ marginTop: 0 }} onClick={() => setAdding(true)}>
         Add a batch
       </button>
+
+      {totalWasteVials > 0 ? (
+        <div className="card left-rule band-soon" style={{ marginTop: 12, marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span className="pill band-soon" style={{ padding: '2px 8px' }}>
+              <span className="pill-icon" aria-hidden="true">◔</span>Expiry Risk Summary
+            </span>
+            <span style={{ fontSize: 13, color: 'var(--ink-soft)' }}>
+              Projected from dispensing pace
+            </span>
+          </div>
+          <div style={{ fontWeight: 650, fontSize: 15, marginTop: 8 }}>
+            {totalWasteVials} {totalWasteVials === 1 ? 'vial' : 'vials'} across {atRiskBatches.length} {atRiskBatches.length === 1 ? 'batch' : 'batches'} projected to expire unused
+          </div>
+          <div className="card-meta">
+            Nearby dispensaries can take this stock before it spoils. Check the Requests tab to propose swaps.
+          </div>
+        </div>
+      ) : null}
 
       <div className="section-title">Your stock · {mine.length} batches</div>
 
@@ -67,6 +99,13 @@ export function Inventory({
             <div style={{ marginTop: 10 }}>
               <ExpiryPill date={b.expiryDate} now={now} />
             </div>
+
+            {atRiskMap.has(b.id) ? (
+              <div className="flag">
+                <span aria-hidden="true">◔</span>
+                {atRiskMap.get(b.id)!.why}
+              </div>
+            ) : null}
 
             {reserved > 0 ? (
               <div className="flag">
