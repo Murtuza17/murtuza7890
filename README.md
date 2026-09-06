@@ -120,11 +120,14 @@ works. See [`docs/ai-design.md`](docs/ai-design.md).
 
 ## Two things worth trying first
 
-**The double-claim (60 seconds).** Open two browser windows. Sign in as `BLNG`
-in one and `MDJL` in the other. Both go to **Transfers** → the antivenom card
-says *Claim 4 vials*. Tap it in one window, then the other. One gets six-digit
-handoff codes. The other is told **"Already committed to … just now"** — who won
-and when, not a failure code.
+**The double-claim (60 seconds).** Sign-in is a clinic PIN kept in
+`localStorage`, which every regular tab and window on a browser shares — so
+open one **normal** window and one **Incognito / Private** window, not two
+regular tabs, or the second one just shows the first clinic already signed in.
+Sign in as `BLNG` in one and `MDJL` in the other. Both go to **Transfers** →
+the antivenom card says *Claim 4 vials*. Tap it in one window, then the other.
+One gets six-digit handoff codes. The other is told **"Already committed to …
+just now"** — who won and when, not a failure code.
 
 **The offline queue (30 seconds).** Sign in anywhere, scroll to **Demo controls**,
 tap **Cut the connection**. Record use of a batch — it saves, because your own
