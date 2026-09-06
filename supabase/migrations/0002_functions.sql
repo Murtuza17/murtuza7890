@@ -796,6 +796,86 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
+-- PROPOSE A TRANSFER — a clinic offering stock nobody asked for.
+--
+-- The mirror image of claim_from_match: there, a receiver claims surplus
+-- against a request and accept_transfer's locked check is what makes it
+-- safe. Here, a sender offers surplus with no request behind it at all —
+-- the anticipate.ts suggestion feature's "outgoing" half, and the same
+-- shape the seeded contested-antivenom demo already uses (two proposed
+-- rows against one batch, nothing reserved until one is accepted).
+--
+-- This does not lock or reserve anything, on purpose. A proposal is not a
+-- commitment — it is exactly as safe to have several outstanding against
+-- the same batch as the seed data already assumes, because accept_transfer
+-- is the one place that locks the row and decides who actually gets the
+-- stock. Skipping that here would duplicate the one piece of logic this
+-- whole schema exists to keep in a single place.
+--
+-- The one thing this DOES have to check, and claim_from_match does not:
+-- that the batch being offered actually belongs to the clinic offering it.
+-- Without that, a hostile client holding the anon key could propose moving
+-- vials out of a batch it does not own — the offer itself is enough to
+-- misinform the receiving clinic even though accept_transfer would still
+-- refuse to move real stock.
+-- ---------------------------------------------------------------------------
+create or replace function public.propose_transfer(
+  p_token uuid, p_batch_id uuid, p_to_clinic_id uuid, p_qty int, p_client_id uuid
+) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+declare v_clinic uuid; v_batch record; v_transfer uuid; v_available int;
+        v_result jsonb; v_existing jsonb;
+begin
+  select result into v_existing from rpc_results where client_id = p_client_id;
+  if found then return v_existing; end if;
+
+  v_clinic := public._clinic_for_session(p_token);
+
+  if p_qty <= 0 then return jsonb_build_object('ok', false, 'error', 'bad_qty'); end if;
+  if p_to_clinic_id = v_clinic then
+    return jsonb_build_object('ok', false, 'error', 'own_clinic');
+  end if;
+  if not exists (select 1 from clinics where id = p_to_clinic_id) then
+    return jsonb_build_object('ok', false, 'error', 'unknown_clinic');
+  end if;
+
+  select * into v_batch from batches where id = p_batch_id;
+  if not found then return jsonb_build_object('ok', false, 'error', 'not_found'); end if;
+  if v_batch.clinic_id <> v_clinic then
+    return jsonb_build_object('ok', false, 'error', 'not_your_batch');
+  end if;
+  if v_batch.status <> 'active' then
+    return jsonb_build_object('ok', false, 'error', 'batch_not_active');
+  end if;
+
+  -- A courtesy check, not the enforcement point — same division of labour as
+  -- everywhere else in this file. accept_transfer's own locked recompute is
+  -- what actually protects the batch; this only stops an offer for more than
+  -- the shelf shows right now. Reads the same view the board does rather
+  -- than re-deriving SUM(delta) here, so there is exactly one place that
+  -- knows how "available" is computed.
+  select available into v_available from batch_stock where batch_id = p_batch_id;
+  if coalesce(v_available, 0) < p_qty then
+    return jsonb_build_object(
+      'ok', false, 'error', 'insufficient_stock', 'available', coalesce(v_available, 0));
+  end if;
+
+  insert into transfers (request_id, batch_id, from_clinic_id, to_clinic_id, qty, status, client_id)
+  values (null, p_batch_id, v_clinic, p_to_clinic_id, p_qty, 'proposed', p_client_id)
+  returning id into v_transfer;
+
+  insert into events (entity_type, entity_id, type, actor_clinic_id, payload)
+  values ('transfer', v_transfer, 'transfer_proposed', v_clinic,
+          jsonb_build_object('batch_id', p_batch_id, 'to_clinic_id', p_to_clinic_id, 'qty', p_qty));
+
+  v_result := jsonb_build_object('ok', true, 'transfer_id', v_transfer);
+  insert into rpc_results (client_id, operation, result)
+  values (p_client_id, 'propose_transfer', v_result);
+  return v_result;
+end $$;
+
+-- ---------------------------------------------------------------------------
 -- REQUEST FILL STATE
 --
 -- `requests.status` has had open | partially_filled | filled since 0001, and the

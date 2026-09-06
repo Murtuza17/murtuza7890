@@ -43,7 +43,7 @@ const READABLE = new Set([
 const CALLABLE = new Set([
   'clinic_login', 'accept_transfer', 'decline_transfer', 'cancel_transfer',
   'dispatch_transfer', 'confirm_handoff', 'log_movement', 'create_batch',
-  'create_request', 'claim_from_match', 'sweep_expired_reservations',
+  'create_request', 'propose_transfer', 'claim_from_match', 'sweep_expired_reservations',
 ])
 
 const send = (res, code, body) => {

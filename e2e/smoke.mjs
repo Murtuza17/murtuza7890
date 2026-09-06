@@ -316,6 +316,43 @@ console.log('== the board proposes a transfer nobody asked for ==')
 }
 
 console.log('')
+console.log('== the sender side of the same suggestion can act on it too ==')
+{
+  // Jadcherla is the OTHER half of the pairing above: the clinic about to
+  // waste stock, not the one running short. propose_transfer is the RPC
+  // that makes its "Offer" button do something real instead of just naming
+  // a phone number to call.
+  const { ctx, page } = await signIn('JDCL', '3456')
+
+  // Baseline count on the Transfers tab itself, before touching anything —
+  // each tab mounts only its own cards, so counting on the wrong tab would
+  // just read zero either way and hide a real ordering mistake here.
+  await page.click('.tab:has-text("Transfers")')
+  await page.waitForTimeout(400)
+  const transfersBefore = await page.locator('.card', { hasText: 'Offered' }).count()
+
+  await page.click('.tab:has-text("Requests")')
+  await page.waitForTimeout(700)
+  const body = await page.locator('main').innerText()
+  ok(/Offer \d+ vials? to \w+/i.test(body),
+     'the wasting clinic sees the outgoing half of the same suggestion', body.slice(0, 200))
+
+  const offerButton = page.locator('button', { hasText: /^Offer \d+ vials? to \w+$/ }).first()
+  await offerButton.click()
+  await page.waitForSelector('text=/Offer sent/i', { timeout: 10000 })
+  ok(true, 'tapping Offer creates a real proposed transfer, not a stuck queue item')
+
+  await page.click('.tab:has-text("Transfers")')
+  await page.waitForFunction(
+    (before) => [...document.querySelectorAll('.card')].filter((c) => c.textContent?.includes('Offered')).length > before,
+    transfersBefore,
+    { timeout: 10000 },
+  )
+  ok(true, 'and the offer shows up on the Transfers tab as a real proposed transfer')
+  await ctx.close()
+}
+
+console.log('')
 console.log('== natural-language intake degrades to the form ==')
 {
   // No ANTHROPIC_API_KEY and no /api route in the local shim, so the parse

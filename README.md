@@ -107,12 +107,22 @@ clinics will run out, then pairs the two. In the seeded district Jadcherla holds
 about one a day and is nearly out; they are 13 km apart. Sign in as `BLNG` and
 the Requests tab already says **"Ask Jadcherla for 19 vials"** — with both halves
 of the reasoning shown, and marked a prediction rather than a fact. No request
-was posted. Deterministic, offline, zero cost.
+was posted; it's a suggestion, not an action, until a worker taps it. Sign in as
+`JDCL` instead and the same pairing shows its other half: **"Offer 19 vials to
+Balanagar"**, one tap away from a real proposed transfer through the same
+`propose_transfer` path a manual offer would use. Deterministic, offline, zero
+cost — only the tap itself needs a connection.
 
-**It reads plain speech, in English or Telugu.** *"20 vials FMD vaccine, two
-herds down at Peddapur"* becomes a filled-in draft the worker checks and posts.
-Optional: without an API key the manual form is untouched and everything else
-works. See [`docs/ai-design.md`](docs/ai-design.md).
+**It reads plain speech, in English, Telugu, or Hindi.** *"20 vials FMD vaccine,
+two herds down at Peddapur"* becomes a filled-in draft the worker checks and
+posts, dictated or typed. Optional: without an API key the manual form is
+untouched and everything else works. See [`docs/ai-design.md`](docs/ai-design.md).
+
+**It switches language from the topbar.** Tabs, statuses, urgency levels, and
+primary actions are available in English, Telugu (`తెలుగు`), and Hindi
+(`हिन्दी`) — a first pass, not full coverage yet; see `MEMO.md` for exactly
+what's still English-only and why that's an honest trade-off under this
+brief's deadline rather than an oversight.
 
 ## Two things worth trying first
 

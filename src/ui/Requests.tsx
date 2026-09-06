@@ -209,6 +209,27 @@ function SuggestionCard({
     setBusy(false)
   }
 
+  // The sender-side mirror. Matched on batch + receiver — both real,
+  // already-sent RPC args — rather than a marker field, same reasoning as
+  // `queued` above. propose_transfer only ever offers this exact batch to
+  // this exact clinic from this card, so the pair is already unique.
+  const queuedOffer = outbox.find(
+    (i) =>
+      i.op === 'propose_transfer' &&
+      i.args['p_batch_id'] === suggestion.batchId &&
+      i.args['p_to_clinic_id'] === suggestion.toClinicId,
+  )
+
+  async function offerThis() {
+    setBusy(true)
+    await enqueue('propose_transfer', {
+      p_batch_id: suggestion.batchId,
+      p_to_clinic_id: suggestion.toClinicId,
+      p_qty: suggestion.qty,
+    })
+    setBusy(false)
+  }
+
   const otherClinic = outgoing
     ? model.clinicsById.get(suggestion.toClinicId)
     : model.clinicsById.get(suggestion.fromClinicId)
@@ -253,11 +274,24 @@ function SuggestionCard({
             {busy ? 'Posting…' : `Ask for ${suggestion.qty} ${unit}s`}
           </button>
         )
+      ) : queuedOffer && queuedOffer.status === 'done' ? (
+        <Note kind="info">
+          Offer sent. See it under Transfers once {otherClinic?.name ?? 'they'} respond.
+        </Note>
+      ) : queuedOffer && queuedOffer.status === 'rejected' ? (
+        <Note kind="error">{queuedOffer.lastError}</Note>
+      ) : queuedOffer ? (
+        <Note kind="warn">Waiting to send — not offered yet.</Note>
       ) : (
-        <div className="card-meta">
-          <strong>Call {otherClinic?.name ?? 'them'}</strong>
-          {otherClinic?.phone ? ` at ${otherClinic.phone}` : ''} to arrange this.
-        </div>
+        <>
+          <button className="btn" disabled={busy} onClick={() => void offerThis()}>
+            {busy ? 'Sending…' : `Offer ${suggestion.qty} ${unit}s to ${suggestion.toVillage}`}
+          </button>
+          <div className="card-meta" style={{ marginTop: 6 }}>
+            Or call <strong>{otherClinic?.name ?? 'them'}</strong>
+            {otherClinic?.phone ? ` at ${otherClinic.phone}` : ''} to arrange this directly.
+          </div>
+        </>
       )}
     </div>
   )

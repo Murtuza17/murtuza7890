@@ -28,6 +28,7 @@ export type OpName =
   | 'log_movement'
   | 'create_batch'
   | 'create_request'
+  | 'propose_transfer'
   | 'claim_from_match'
   | 'accept_transfer'
   | 'decline_transfer'
@@ -95,6 +96,15 @@ const PERMANENT_ERRORS: ReadonlySet<string> = new Set([
   'would_go_negative',
   'reserved_stock',
   'session_invalid',
+  // propose_transfer's own refusals-on-the-merits. Retrying any of these
+  // hits the exact same answer every time — the batch does not become less
+  // quarantined, the clinic does not stop being itself — so treating them as
+  // "maybe next time" would jam the serial queue behind a request that can
+  // never succeed, the same failure mode the _from_suggestion bug caused via
+  // a different path (a malformed call instead of a real rejection).
+  'own_clinic',
+  'unknown_clinic',
+  'batch_not_active',
 ])
 
 export function isPermanent(error: string | undefined): boolean {

@@ -81,6 +81,7 @@ begin
         public.create_batch(uuid, uuid, text, date, boolean, int, uuid, timestamptz),
         public.create_request(uuid, uuid, int, text, int, date, text, uuid),
         public.claim_from_match(uuid, uuid, int, uuid, uuid),
+        public.propose_transfer(uuid, uuid, uuid, int, uuid),
         public.sweep_expired_reservations()
         to %I', r);
 

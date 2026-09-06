@@ -29,12 +29,17 @@ Two tools, chosen per job. **Forecasting** is deterministic arithmetic over the
 ledger — it runs on-device in under a millisecond with the connection cut, which
 is why it is not a model call: the user is on 2G mid-outbreak and may have no
 signal exactly when the stakes peak. It closes the loop, pairing predicted waste
-at one clinic against predicted stockout at another and proposing the transfer
-with no human trigger at all. **A language model** handles one sentence of
-English or Telugu into a draft request — off the critical path, key held
-server-side, every field re-validated against the catalogue, and degrading to
-the untouched manual form when it is unavailable. Nothing a worker must be able
-to check — match ranking, claim arbitration — uses a model.
+at one clinic against predicted stockout at another and surfacing the pairing
+with no human trigger at all — the suggestion itself needs nobody to have
+noticed anything or posted anything first. Acting on it is still a real,
+explicit tap, on either side (`propose_transfer` for the clinic about to waste
+stock, `create_request` for the clinic about to run out): a forecast gets to
+suggest, never to move stock or file a request on a worker's behalf. **A
+language model** handles one sentence of English, Telugu, or Hindi into a draft
+request — off the critical path, key held server-side, every field re-validated
+against the catalogue, and degrading to the untouched manual form when it is
+unavailable. Nothing a worker must be able to check — match ranking, claim
+arbitration — uses a model.
 
 Full reasoning, including what I got wrong about the "no paid APIs" constraint:
 [`docs/ai-design.md`](docs/ai-design.md).

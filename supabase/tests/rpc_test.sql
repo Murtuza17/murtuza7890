@@ -449,6 +449,92 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
+\echo '== proposing a transfer nobody asked for =='
+-- The sender-side mirror of claim_from_match: an offer with no request behind
+-- it. Unlike claiming, this must never lock or reserve anything — several
+-- proposals can coexist against the same batch, exactly like the seeded
+-- contested antivenom already does, and accept_transfer stays the one place
+-- that arbitrates who actually gets the stock.
+-- ---------------------------------------------------------------------------
+do $$
+declare v_tok uuid; v_batch uuid; v_to uuid; v_client uuid := gen_random_uuid();
+        r1 jsonb; r2 jsonb; v_count int; v_reserved int;
+begin
+  v_tok := _token('BLNG','5678');
+  v_batch := _batch('BQ-5533');            -- Balanagar's own Black Quarter batch, 48 on hand
+  select id into v_to from clinics where code = 'MDJL';
+
+  r1 := propose_transfer(v_tok, v_batch, v_to, 10, v_client);
+  perform _assert((r1->>'ok')::boolean, 'a clinic can offer its own surplus unprompted');
+  perform _assert(
+    (select status from transfers where id = (r1->>'transfer_id')::uuid) = 'proposed',
+    'the offer sits as proposed, not pre-accepted'
+  );
+
+  select qty_reserved into v_reserved from batches where id = v_batch;
+  perform _assert(v_reserved = 0, 'an unaccepted offer reserves nothing');
+
+  -- A double-tap on a bad connection.
+  r2 := propose_transfer(v_tok, v_batch, v_to, 10, v_client);
+  select count(*) into v_count from transfers where client_id = v_client;
+  perform _assert(v_count = 1, 'a double-tapped offer creates one transfer, not two');
+  perform _assert(r1->>'transfer_id' = r2->>'transfer_id', 'and returns the same transfer id');
+end $$;
+
+do $$
+declare v_tok uuid; v_to uuid; r jsonb;
+begin
+  -- MBNR trying to offer JADCHERLA's batch — the check claim_from_match does
+  -- not need, because there the batch's owner is looked up FROM the batch,
+  -- never asserted by the caller.
+  v_tok := _token('MBNR','1234');
+  select id into v_to from clinics where code = 'DVKD';
+  r := propose_transfer(v_tok, _batch('BRU-8830'), v_to, 1, gen_random_uuid());
+  perform _assert(r->>'error' = 'not_your_batch',
+    'a clinic cannot offer a batch it does not hold');
+end $$;
+
+do $$
+declare v_tok uuid; v_to uuid; r jsonb;
+begin
+  v_tok := _token('MBNR','1234');
+  select id into v_to from clinics where code = 'MBNR';
+  r := propose_transfer(v_tok, _batch('OXY-7741'), v_to, 1, gen_random_uuid());
+  perform _assert(r->>'error' = 'own_clinic', 'a clinic cannot offer stock to itself');
+end $$;
+
+do $$
+declare v_tok uuid; r jsonb;
+begin
+  v_tok := _token('MBNR','1234');
+  r := propose_transfer(v_tok, _batch('OXY-7741'), gen_random_uuid(), 1, gen_random_uuid());
+  perform _assert(r->>'error' = 'unknown_clinic', 'the receiving clinic must actually exist');
+end $$;
+
+do $$
+declare v_tok uuid; v_to uuid; r jsonb;
+begin
+  -- Cold chain broken in transit: quarantined, never offered. Same rule
+  -- anticipate.ts already enforces client-side; the server enforces it too
+  -- rather than trusting the browser to have applied it.
+  v_tok := _token('JDCL','3456');
+  select id into v_to from clinics where code = 'BLNG';
+  r := propose_transfer(v_tok, _batch('HS-9044'), v_to, 1, gen_random_uuid());
+  perform _assert(r->>'error' = 'batch_not_active',
+    'a quarantined batch can never be offered, even by its own holder');
+end $$;
+
+do $$
+declare v_tok uuid; v_to uuid; r jsonb;
+begin
+  v_tok := _token('DVKD','4567');
+  select id into v_to from clinics where code = 'MBNR';
+  r := propose_transfer(v_tok, _batch_at('DVKD','CAL-1102'), v_to, 9999, gen_random_uuid());
+  perform _assert(r->>'error' = 'insufficient_stock',
+    'a clinic cannot offer more than it actually has right now');
+end $$;
+
+-- ---------------------------------------------------------------------------
 \echo '== request fill state =='
 -- ---------------------------------------------------------------------------
 do $$

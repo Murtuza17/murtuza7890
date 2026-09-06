@@ -29,9 +29,16 @@ describe('contested vs uncontested', () => {
     '%s is contested — the server must arbitrate', (op) => expect(isContested(op)).toBe(true),
   )
 
-  it.each(['log_movement', 'create_batch', 'create_request'] as OpName[])(
+  it.each(['log_movement', 'create_batch', 'create_request', 'propose_transfer'] as OpName[])(
     '%s is own-clinic — nobody else can disagree', (op) => expect(isContested(op)).toBe(false),
   )
+
+  it('an unaccepted offer is not a claim — proposing does not lock anything, so it is never contested', () => {
+    // Several proposals can safely coexist against the same batch, exactly
+    // like the seeded double-offer demo does. accept_transfer, not the
+    // offer itself, is the one place that arbitrates who gets the stock.
+    expect(isContested('propose_transfer')).toBe(false)
+  })
 })
 
 describe('the UI never claims a state the server has not confirmed', () => {
@@ -110,6 +117,19 @@ describe('results', () => {
   it.each(['wrong_state', 'not_your_transfer', 'not_found', 'session_invalid'])(
     'treats %s as final rather than retrying forever', (error) => {
       expect(applyResult(markSending(item()), { ok: false, error }).status).toBe('rejected')
+    },
+  )
+
+  /**
+   * propose_transfer's own refusals. Missing one of these here is the exact
+   * shape of bug that made it to production once already: a real,
+   * never-going-to-change rejection misclassified as "maybe next time"
+   * jams the serial queue behind an action that can never succeed.
+   */
+  it.each(['own_clinic', 'unknown_clinic', 'batch_not_active', 'insufficient_stock'])(
+    'treats propose_transfer\'s %s as final, not a reason to keep retrying', (error) => {
+      expect(applyResult(markSending(item({ op: 'propose_transfer' })), { ok: false, error }).status)
+        .toBe('rejected')
     },
   )
 
