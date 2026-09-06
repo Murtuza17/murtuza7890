@@ -11,19 +11,11 @@ import { Transfers } from './ui/Transfers'
 import { useBoard, useSync } from './ui/useBoard'
 import { Note } from './ui/bits'
 
-import { getStoredLang, setStoredLang, type Lang } from './domain/i18n'
-
 export default function App() {
   const [session, setSession] = useState<Session | null>(loadSession)
   const [tab, setTab] = useState<Tab>('stock')
-  const [lang, setLang] = useState<Lang>(getStoredLang)
   const sync = useSync()
   const model = useBoard(sync.board)
-
-  function handleLangChange(next: Lang) {
-    setLang(next)
-    setStoredLang(next)
-  }
 
   useEffect(() => {
     if (session) void hydrate()
@@ -56,22 +48,20 @@ export default function App() {
     )
   }
 
-  if (!session) return <Login lang={lang} onLangChange={handleLangChange} onSignedIn={setSession} />
+  if (!session) return <Login onSignedIn={setSession} />
 
   const now = new Date()
 
   return (
     <Shell session={session} sync={sync} tab={tab} onTab={setTab}
-           lang={lang} onLangChange={handleLangChange}
            onSignOut={() => setSession(null)}>
       {tab === 'stock' ? (
-        <Inventory model={model} session={session} now={now} lang={lang} />
+        <Inventory model={model} session={session} now={now} />
       ) : tab === 'requests' ? (
-        <Requests model={model} session={session} now={now} outbox={sync.outbox} lang={lang} />
+        <Requests model={model} session={session} now={now} outbox={sync.outbox} />
       ) : (
-        <Transfers model={model} session={session} now={now} outbox={sync.outbox} lang={lang} />
+        <Transfers model={model} session={session} now={now} outbox={sync.outbox} />
       )}
     </Shell>
   )
 }
-

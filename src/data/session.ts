@@ -1,7 +1,7 @@
 /**
  * Clinic session. Code + 4-digit PIN, as the brief requires — no OAuth, no SMS.
  *
- * DEVIATION from CLAUDE.md §2, flagged: the spec says "a signed clinic id in
+ * DEVIATION from the brief, flagged: the spec says "a signed clinic id in
  * localStorage". Signing needs a server-held secret, and there is nowhere to
  * keep one in a static Vercel deploy without adding an edge function — so a
  * "signed" id would have been signed with a key sitting in the bundle, which is

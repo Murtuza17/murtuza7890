@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { findMatches, formatKm, planFulfilment, type Match } from '../domain/matching'
 import { anticipateTransfers, bestPerNeed, type AnticipatedTransfer } from '../domain/anticipate'
 import { humanizeExpiry } from '../domain/expiry'
-import { t, type Lang } from '../domain/i18n'
 import { enqueue } from '../data/sync'
 import { parseRequestText } from '../data/intake'
 import type { OutboxItem } from '../domain/outbox'
@@ -22,9 +21,9 @@ const URGENCY: Record<StockRequest['urgency'], { label: string; icon: string; cl
  * can fill them.
  */
 export function Requests({
-  model, session, now, outbox, lang = 'en',
+  model, session, now, outbox,
 }: {
-  model: BoardModel; session: Session; now: Date; outbox: readonly OutboxItem[]; lang?: Lang
+  model: BoardModel; session: Session; now: Date; outbox: readonly OutboxItem[]
 }) {
   const [open, setOpen] = useState<string | null>(null)
   const [posting, setPosting] = useState(false)
@@ -58,7 +57,7 @@ export function Requests({
         <div className="card left-rule band-expired" style={{ marginBottom: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span className="pill band-expired" style={{ padding: '2px 8px' }}>
-              <span className="pill-icon" aria-hidden="true">!!</span>{t('outbreakAlert', lang)}
+              <span className="pill-icon" aria-hidden="true">!!</span>Outbreak Alert
             </span>
             <span style={{ fontSize: 13, color: 'var(--ink-soft)' }}>
               Usage surge detected in district
@@ -97,13 +96,13 @@ export function Requests({
       ) : null}
 
       <button className="btn" onClick={() => setPosting(true)} style={{ marginTop: 0 }}>
-        {t('askForMedicine', lang)}
+        Ask for medicine
       </button>
 
       {suggestions.length > 0 ? (
         <>
           <div className="section-title">
-            {t('worthDoingNow', lang)}
+            Worth doing now · predicted from your own usage
           </div>
           {suggestions.map((s) => (
             <SuggestionCard
@@ -118,7 +117,7 @@ export function Requests({
         </>
       ) : null}
 
-      <div className="section-title">{t('yourRequests', lang)}</div>
+      <div className="section-title">Your requests</div>
       {mine.length === 0 ? (
         <Empty title="You have not asked for anything">
           Post a shortage and nearby dispensaries holding that medicine will appear here.
@@ -129,7 +128,7 @@ export function Requests({
         ))
       )}
 
-      <div className="section-title">{t('otherVillagesNeed', lang)}</div>
+      <div className="section-title">Other villages need</div>
       {others.length === 0 ? (
         <Empty title="No open shortages nearby">
           Nothing is being asked for right now across the district.
@@ -146,7 +145,7 @@ export function Requests({
       ) : null}
 
       {posting ? (
-        <PostSheet model={model} lang={lang} onClose={() => setPosting(false)} />
+        <PostSheet model={model} onClose={() => setPosting(false)} />
       ) : null}
     </>
   )
@@ -495,31 +494,7 @@ function ClaimButton({
   )
 }
 
-/**
- * The Web Speech API has no TypeScript lib types and two vendor-prefixed
- * global names; this is the minimal shape this file actually calls.
- */
-interface SpeechRecognitionLike {
-  lang: string
-  interimResults: boolean
-  maxAlternatives: number
-  onstart: (() => void) | null
-  onend: (() => void) | null
-  onerror: ((event: { error?: string }) => void) | null
-  onresult: ((event: { results?: { [i: number]: { [j: number]: { transcript: string } } } }) => void) | null
-  start: () => void
-}
-
-function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | undefined {
-  if (typeof window === 'undefined') return undefined
-  const w = window as unknown as {
-    SpeechRecognition?: new () => SpeechRecognitionLike
-    webkitSpeechRecognition?: new () => SpeechRecognitionLike
-  }
-  return w.SpeechRecognition ?? w.webkitSpeechRecognition
-}
-
-function PostSheet({ model, lang = 'en', onClose }: { model: BoardModel; lang?: Lang; onClose: () => void }) {
+function PostSheet({ model, onClose }: { model: BoardModel; onClose: () => void }) {
   const [drugId, setDrugId] = useState('')
   const [qty, setQty] = useState('')
   const [urgency, setUrgency] = useState<StockRequest['urgency']>('urgent')
@@ -533,67 +508,9 @@ function PostSheet({ model, lang = 'en', onClose }: { model: BoardModel; lang?: 
   // simply fails. See src/data/intake.ts.
   const [sentence, setSentence] = useState('')
   const [parsing, setParsing] = useState(false)
-  const [listening, setListening] = useState(false)
   const [intakeNote, setIntakeNote] = useState<
     { kind: 'error' | 'warn' | 'info'; text: string } | null
   >(null)
-
-  function startListening() {
-    const SpeechAPI = getSpeechRecognitionCtor()
-
-    if (!SpeechAPI) {
-      setIntakeNote({
-        kind: 'warn',
-        text: 'Voice dictation is supported in Chrome, Edge, and Safari. On Firefox, please type your request.',
-      })
-      return
-    }
-
-    try {
-      const recognition = new SpeechAPI()
-      recognition.lang = lang === 'te' ? 'te-IN' : lang === 'hi' ? 'hi-IN' : 'en-IN'
-      recognition.interimResults = false
-      recognition.maxAlternatives = 1
-
-      recognition.onstart = () => {
-        setListening(true)
-        setIntakeNote({ kind: 'info', text: 'Listening… speak your medicine need.' })
-      }
-      recognition.onend = () => setListening(false)
-      // Dictation streams audio to the browser's own speech service — it
-      // needs a live connection even though nothing else on this screen
-      // does. That makes 'network' the single most likely failure for this
-      // app's actual users, not an edge case, so it gets its own honest
-      // message rather than falling through to a silent reset — §7: "Errors
-      // say what happened and what to do next."
-      recognition.onerror = (e) => {
-        setListening(false)
-        if (e.error === 'not-allowed' || e.error === 'permission-denied') {
-          setIntakeNote({ kind: 'error', text: 'Microphone permission denied. Allow microphone access to dictate.' })
-        } else if (e.error === 'network') {
-          setIntakeNote({ kind: 'warn', text: 'Dictation needs a signal. Type your request instead — it still works offline.' })
-        } else if (e.error === 'no-speech') {
-          setIntakeNote({ kind: 'warn', text: 'Did not catch that. Tap Dictate and try again, or type it in.' })
-        } else if (e.error !== 'aborted') {
-          setIntakeNote({ kind: 'warn', text: 'Dictation did not work this time — please type your request instead.' })
-        }
-      }
-
-      recognition.onresult = (event) => {
-        const transcript = event.results?.[0]?.[0]?.transcript
-        if (transcript) {
-          setSentence(transcript)
-          setIntakeNote({ kind: 'info', text: `Heard: “${transcript}” — tap Fill this in for me.` })
-        }
-        setListening(false)
-      }
-
-      recognition.start()
-    } catch {
-      setListening(false)
-      setIntakeNote({ kind: 'warn', text: 'Dictation did not work this time — please type your request instead.' })
-    }
-  }
 
   const n = Number(qty)
   const valid = drugId !== '' && Number.isInteger(n) && n > 0
@@ -638,7 +555,7 @@ function PostSheet({ model, lang = 'en', onClose }: { model: BoardModel; lang?: 
   }
 
   return (
-    <Sheet title={t('askForMedicine', lang)} onClose={onClose}>
+    <Sheet title="Ask for medicine" onClose={onClose}>
       <div className="field">
         <label htmlFor="say">
           Say what you need <span className="hint">English or Telugu · optional</span>
@@ -648,24 +565,12 @@ function PostSheet({ model, lang = 'en', onClose }: { model: BoardModel; lang?: 
           placeholder="20 vials FMD vaccine, two herds down at Peddapur"
           onChange={(e) => setSentence(e.target.value)}
         />
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            type="button"
-            className="btn btn-quiet" disabled={parsing || sentence.trim() === ''}
-            style={{ flex: 1 }}
-            onClick={() => void parseSentence()}
-          >
-            {parsing ? 'Reading…' : t('fillInForMe', lang)}
-          </button>
-          <button
-            type="button"
-            className={`btn btn-quiet ${listening ? 'band-critical' : ''}`}
-            style={{ minWidth: 110, flexShrink: 0 }}
-            onClick={startListening}
-          >
-            {listening ? t('listening', lang) : `🎙️ ${t('dictate', lang)}`}
-          </button>
-        </div>
+        <button
+          className="btn btn-quiet" disabled={parsing || sentence.trim() === ''}
+          onClick={() => void parseSentence()}
+        >
+          {parsing ? 'Reading…' : 'Fill this in for me'}
+        </button>
         {intakeNote ? (
           <Note kind={intakeNote.kind === 'error' ? 'error' : intakeNote.kind === 'warn' ? 'warn' : 'info'}>
             {intakeNote.text}

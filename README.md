@@ -11,7 +11,7 @@ during an outbreak. Every trade-off below follows from that sentence.
 - **Live app:** [sidproject-zeta.vercel.app](https://sidproject-zeta.vercel.app)
 - **Trade-off memo:** [`MEMO.md`](./MEMO.md)
 - **Where AI is used, and where it isn't:** [`docs/ai-design.md`](docs/ai-design.md)
-- **The brief:** [`docs/brief/`](./docs/brief/) · full spec in [`CLAUDE.md`](./CLAUDE.md)
+- **The brief:** [`docs/brief/`](./docs/brief/)
 
 ---
 
@@ -113,16 +113,10 @@ Balanagar"**, one tap away from a real proposed transfer through the same
 `propose_transfer` path a manual offer would use. Deterministic, offline, zero
 cost — only the tap itself needs a connection.
 
-**It reads plain speech, in English, Telugu, or Hindi.** *"20 vials FMD vaccine,
-two herds down at Peddapur"* becomes a filled-in draft the worker checks and
-posts, dictated or typed. Optional: without an API key the manual form is
-untouched and everything else works. See [`docs/ai-design.md`](docs/ai-design.md).
-
-**It switches language from the topbar.** Tabs, statuses, urgency levels, and
-primary actions are available in English, Telugu (`తెలుగు`), and Hindi
-(`हिन्दी`) — a first pass, not full coverage yet; see `MEMO.md` for exactly
-what's still English-only and why that's an honest trade-off under this
-brief's deadline rather than an oversight.
+**It reads plain speech, in English or Telugu.** *"20 vials FMD vaccine, two
+herds down at Peddapur"* becomes a filled-in draft the worker checks and posts.
+Optional: without an API key the manual form is untouched and everything else
+works. See [`docs/ai-design.md`](docs/ai-design.md).
 
 ## Two things worth trying first
 
@@ -146,7 +140,7 @@ is a race and no device may decide a race on its own.
 Everything runs locally with no Supabase account and no network.
 
 ```bash
-npm test          # 182 unit tests — ledger, state machine, matching, forecast, outbox
+npm test          # 188 unit tests — ledger, state machine, matching, forecast, outbox
 npm run test:db   # schema, RPCs, RLS probes against a throwaway Postgres 16
 npm run test:race # + five clinics claiming the same 4 vials simultaneously
 npm run test:e2e  # + the whole app in headless Chromium at 360px
@@ -154,7 +148,7 @@ npm run typecheck
 ```
 
 `test:db` spins up its own Postgres, applies the migrations verbatim, seeds, then
-asserts 77 behaviours including 13 hostile probes of what a browser holding the
+asserts 87 behaviours including 13 hostile probes of what a browser holding the
 anon key can do. `test:e2e` adds a PostgREST-compatible shim
 (`scripts/local-api.mjs`) so the real UI runs against a real database.
 

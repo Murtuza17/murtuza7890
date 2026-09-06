@@ -33,7 +33,7 @@ export function haversineKm(
  * is likely dead on arrival — and a vaccine that arrives inert is worse than no
  * vaccine, because the herd is recorded as protected when it isn't.
  *
- * DEVIATION from CLAUDE.md §6, flagged deliberately: the spec's filter list does
+ * DEVIATION from the brief, flagged deliberately: the spec's filter list does
  * not mention cold chain. This does not filter the match out — the receiving
  * clinic may well have a cold box — it raises `needsColdBox` so the card can say
  * so. Informing the decision, not making it.
@@ -234,7 +234,7 @@ export interface FulfilmentPlan {
 /**
  * Plan a fill across multiple clinics.
  *
- * DEVIATION from CLAUDE.md §6, flagged: the spec describes matching as a ranked
+ * DEVIATION from the brief, flagged: the spec describes matching as a ranked
  * list and stops there. But `partially_filled` is already in the request status
  * enum, and a real outbreak shortage is filled 12 vials from one neighbour and 8
  * from the next — forcing one-clinic-or-nothing would leave the request open

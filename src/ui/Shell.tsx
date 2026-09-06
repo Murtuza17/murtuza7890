@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { humanizeAge } from '../domain/expiry'
 import { pendingCount, rejected, statusLabel, type OutboxItem } from '../domain/outbox'
-import { t, LANG_LABELS, type Lang } from '../domain/i18n'
 import { isForcedOffline, setForcedOffline } from '../data/net'
 import { dismiss, drain, type SyncState } from '../data/sync'
 import { clearSession, type Session } from '../data/session'
@@ -18,14 +17,12 @@ export type Tab = 'stock' | 'requests' | 'transfers'
  * hidden behind a spinner.
  */
 export function Shell({
-  session, sync, tab, onTab, lang = 'en', onLangChange, onSignOut, children,
+  session, sync, tab, onTab, onSignOut, children,
 }: {
   session: Session
   sync: SyncState
   tab: Tab
   onTab: (t: Tab) => void
-  lang?: Lang
-  onLangChange?: (l: Lang) => void
   onSignOut: () => void
   children: React.ReactNode
 }) {
@@ -44,30 +41,15 @@ export function Shell({
           </div>
         </div>
         <div className="topbar-spacer" />
-        {onLangChange ? (
-          <div className="lang-switch" style={{ marginRight: 8 }}>
-            {(['en', 'te', 'hi'] as const).map((l) => (
-              <button
-                key={l}
-                type="button"
-                className="lang-btn"
-                aria-pressed={lang === l}
-                onClick={() => onLangChange(l)}
-              >
-                {LANG_LABELS[l].code}
-              </button>
-            ))}
-          </div>
-        ) : null}
         <button className="linkish" onClick={() => { clearSession(); onSignOut() }}>
-          {t('signOut', lang)}
+          Sign out
         </button>
       </div>
 
       {!sync.online ? (
         <div className="strip strip-offline">
           <span aria-hidden="true">⚠</span>
-          {t('noSignal', lang)} — {pending > 0
+          No signal — {pending > 0
             ? `${pending} ${pending === 1 ? 'action is' : 'actions are'} waiting to send`
             : 'you can still record what you use'}
         </div>
@@ -96,9 +78,9 @@ export function Shell({
 
       <div className="tabs" role="tablist">
         {([
-          ['stock', t('tabStock', lang)],
-          ['requests', t('tabRequests', lang)],
-          ['transfers', t('tabTransfers', lang)],
+          ['stock', 'Your stock'],
+          ['requests', 'Requests'],
+          ['transfers', 'Transfers'],
         ] as const).map(([key, label]) => (
           <button key={key} role="tab" className="tab" aria-selected={tab === key}
                   onClick={() => onTab(key)}>
@@ -155,6 +137,7 @@ const OP_LABEL: Record<string, string> = {
   log_movement: 'Recorded use of stock',
   create_batch: 'Added a batch',
   create_request: 'Asked for medicine',
+  propose_transfer: 'Offered medicine',
   claim_from_match: 'Claimed medicine',
   accept_transfer: 'Claimed medicine',
   decline_transfer: 'Declined an offer',

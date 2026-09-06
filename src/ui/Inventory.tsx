@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { bandFor } from '../domain/expiry'
 import { validateMovement } from '../domain/ledger'
 import { batchOutlook } from '../domain/forecast'
-import { t, type Lang } from '../domain/i18n'
 import { enqueue } from '../data/sync'
 import type { Session } from '../data/session'
 import type { Batch, MovementReason, StockMovement } from '../domain/types'
@@ -17,8 +16,8 @@ import { Empty, ExpiryPill, Note, Qty, Sheet } from './bits'
  * at the top of the screen.
  */
 export function Inventory({
-  model, session, now, lang = 'en',
-}: { model: BoardModel; session: Session; now: Date; lang?: Lang }) {
+  model, session, now,
+}: { model: BoardModel; session: Session; now: Date }) {
   const [logging, setLogging] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
 
@@ -47,7 +46,7 @@ export function Inventory({
         <Empty title="No stock logged yet">
           Add your first batch so nearby dispensaries can see what you could spare.
         </Empty>
-        <button className="btn" onClick={() => setAdding(true)}>{t('addBatch', lang)}</button>
+        <button className="btn" onClick={() => setAdding(true)}>Add a batch</button>
         {adding ? <AddSheet model={model} onClose={() => setAdding(false)} /> : null}
       </>
     )
@@ -56,14 +55,14 @@ export function Inventory({
   return (
     <>
       <button className="btn" style={{ marginTop: 0 }} onClick={() => setAdding(true)}>
-        {t('addBatch', lang)}
+        Add a batch
       </button>
 
       {totalWasteVials > 0 ? (
         <div className="card left-rule band-soon" style={{ marginTop: 12, marginBottom: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span className="pill band-soon" style={{ padding: '2px 8px' }}>
-              <span className="pill-icon" aria-hidden="true">◔</span>{t('expiryRiskSummary', lang)}
+              <span className="pill-icon" aria-hidden="true">◔</span>Expiry Risk Summary
             </span>
             <span style={{ fontSize: 13, color: 'var(--ink-soft)' }}>
               Projected from dispensing pace
@@ -78,7 +77,7 @@ export function Inventory({
         </div>
       ) : null}
 
-      <div className="section-title">{t('tabStock', lang)} · {mine.length} batches</div>
+      <div className="section-title">Your stock · {mine.length} batches</div>
 
       {mine.map((b) => {
         const d = model.drugsById.get(b.drugId)

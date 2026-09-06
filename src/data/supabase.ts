@@ -1,7 +1,7 @@
 /**
  * Supabase access over plain fetch.
  *
- * DEVIATION from CLAUDE.md §2, flagged: the stack is still React + Vite +
+ * DEVIATION from the brief, flagged: the stack is still React + Vite +
  * Supabase, but without @supabase/supabase-js. The SDK was 100 KB gzipped of
  * the 125 KB bundle, and the whole of what this app used from it was `.rpc()`
  * and `select * order limit` — both of which are one PostgREST URL each.
