@@ -176,10 +176,17 @@ makes about webfonts, with a bigger number.
    offered — but two sources of truth for one fact will eventually disagree.
    The same lazy sweep that expires reservations should age batches too.
 
-**Not cut after all:** the demo GIF (`docs/demo.gif`, in the README), and
-**trilingual UI localization** (English, Telugu `తెలుగు`, Hindi `हिन्दी` via
-`src/domain/i18n.ts`). The brief's emphasis on low-digital-literacy field
-workers in rural Telangana made an English-only interface a glaring real-world
-gap; full trilingual switching and native voice dictation (`en-IN`, `te-IN`,
-`hi-IN`) are now live with zero external libraries or bundle bloat.
+**Not cut after all:** the demo GIF (`docs/demo.gif`, in the README), and a
+first pass at **trilingual UI localization** (English, Telugu `తెలుగు`, Hindi
+`हिन्दी` via `src/domain/i18n.ts`). The brief's emphasis on low-digital-literacy
+field workers in rural Telangana made an English-only interface a glaring
+real-world gap. Tabs, statuses, urgency levels, and primary actions switch
+language now, and dictation (`en-IN`, `te-IN`, `hi-IN`, the browser's own
+speech API — zero external libraries, zero bundle cost) fills the request form
+from spoken Telugu or Hindi. Longer explanatory copy — the sign-in screen, the
+forecast "why" sentences — is still English-only; translating it is mechanical
+now that `t()` exists, but sentence-by-sentence coverage of ~1,500 lines of UI
+copy is exactly the kind of thing that should not be rushed in the hours before
+a deadline. Calling it "trilingual" without that caveat would be the kind of
+overclaim this memo exists to avoid making.
 

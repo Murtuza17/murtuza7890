@@ -46,20 +46,20 @@ export function Transfers({
     )
   }
 
-  const transfer = open ? mine.find((t) => t.id === open) : undefined
+  const transfer = open ? mine.find((tr) => tr.id === open) : undefined
 
   return (
     <>
       {live.length > 0 ? <div className="section-title">{t('needsAttention', lang)}</div> : null}
-      {live.map((t) => (
-        <TransferCard key={t.id} transfer={t} model={model} session={session} now={now}
-                      onOpen={() => setOpen(t.id)} />
+      {live.map((tr) => (
+        <TransferCard key={tr.id} transfer={tr} model={model} session={session} now={now}
+                      onOpen={() => setOpen(tr.id)} />
       ))}
 
       {done.length > 0 ? <div className="section-title">{t('finished', lang)}</div> : null}
-      {done.map((t) => (
-        <TransferCard key={t.id} transfer={t} model={model} session={session} now={now}
-                      onOpen={() => setOpen(t.id)} />
+      {done.map((tr) => (
+        <TransferCard key={tr.id} transfer={tr} model={model} session={session} now={now}
+                      onOpen={() => setOpen(tr.id)} />
       ))}
 
       {transfer ? (

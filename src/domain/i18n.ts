@@ -23,7 +23,7 @@ export const STRINGS = {
   tabRequests: {
     en: 'Requests',
     te: 'అభ్యర్థనలు',
-    hi: 'అనురోధ్ / मांग',
+    hi: 'अनुरोध',
   },
   tabTransfers: {
     en: 'Transfers',

@@ -70,13 +70,19 @@ export function Requests({
             const unit = drug?.unit ?? 'vial'
             const rate7d = Math.round(s.signal.recentRate * 7 * 10) / 10
             const baseline7d = Math.round(s.signal.dailyRate * 7 * 10) / 10
-            const ratio = baseline7d > 0 ? Math.round((rate7d / baseline7d) * 10) / 10 : 2
+            // No prior baseline to divide by is not "2x normal" — it is new
+            // demand where none existed. Say that instead of fabricating a
+            // ratio: this whole feature exists to state only what the data
+            // actually supports.
+            const rateText = baseline7d > 0
+              ? `at ${Math.round((rate7d / baseline7d) * 10) / 10}× normal rate`
+              : 'with no prior baseline — new demand'
             const isMine = s.clinicId === session.clinic.id
 
             return (
               <div key={`${s.clinicId}:${s.drugId}`} style={{ marginTop: 8 }}>
                 <div style={{ fontWeight: 650, fontSize: 14.5 }}>
-                  {isMine ? 'Your clinic' : clinic?.name ?? clinic?.village} is using {drug?.name} at {ratio}× normal rate
+                  {isMine ? 'Your clinic' : clinic?.name ?? clinic?.village} is using {drug?.name} {rateText}
                 </div>
                 <div className="card-meta">
                   Using ~{rate7d} {unit}s/week over last 14 days (baseline: ~{baseline7d} {unit}s/week).
@@ -163,15 +169,30 @@ function SuggestionCard({
 }) {
   const [busy, setBusy] = useState(false)
   const unit = model.drugsById.get(suggestion.drugId)?.unit ?? 'vial'
+  const note = `Suggested: ${suggestion.fromClinicName} has ${suggestion.qty} ${unit}s expiring soon`
 
-  // Check if a request was already queued from this suggestion (by matching
-  // drug + qty — good enough to dedupe within a session).
+  // Check if a request was already queued from this suggestion. Matched on
+  // drug + qty + the exact note text (all three are deterministic from the
+  // suggestion) rather than a dedicated marker field: create_request's RPC
+  // signature is p_drug_id/p_qty_needed/p_urgency/p_radius_km/p_needed_by/
+  // p_note/p_client_id only, and Postgres's named-argument call syntax — which
+  // both the real PostgREST and scripts/local-api.mjs use — errors on any
+  // argument name it does not recognise. An earlier version of this sent an
+  // extra `_from_suggestion` field to identify the origin, which made every
+  // request created this way fail server-side on a permanent, unretryable
+  // 400 — but outbox.applyTransportFailure treats any thrown request() error
+  // as transport failure and leaves the item `pending` for retry, and the
+  // queue drains strictly serially (nextToSend takes the oldest pending item,
+  // drain() stops the instant one comes back still pending). So the one bad
+  // tap would have silently jammed every later queued action behind it,
+  // forever, shown as "Waiting to send — no signal" instead of the real
+  // problem. Never send a field the RPC does not declare.
   const queued = outbox.find(
     (i) =>
       i.op === 'create_request' &&
       i.args['p_drug_id'] === suggestion.drugId &&
       i.args['p_qty_needed'] === suggestion.qty &&
-      (i.args as Record<string, unknown>)['_from_suggestion'] === suggestion.batchId,
+      i.args['p_note'] === note,
   )
 
   async function askForThis() {
@@ -183,8 +204,7 @@ function SuggestionCard({
       p_urgency: 'urgent',
       p_radius_km: Math.ceil(suggestion.distanceKm + 5),
       p_needed_by: neededBy.toISOString().slice(0, 10),
-      p_note: `Suggested: ${suggestion.fromClinicName} has ${suggestion.qty} ${unit}s expiring soon`,
-      _from_suggestion: suggestion.batchId,
+      p_note: note,
     })
     setBusy(false)
   }
@@ -441,6 +461,30 @@ function ClaimButton({
   )
 }
 
+/**
+ * The Web Speech API has no TypeScript lib types and two vendor-prefixed
+ * global names; this is the minimal shape this file actually calls.
+ */
+interface SpeechRecognitionLike {
+  lang: string
+  interimResults: boolean
+  maxAlternatives: number
+  onstart: (() => void) | null
+  onend: (() => void) | null
+  onerror: ((event: { error?: string }) => void) | null
+  onresult: ((event: { results?: { [i: number]: { [j: number]: { transcript: string } } } }) => void) | null
+  start: () => void
+}
+
+function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | undefined {
+  if (typeof window === 'undefined') return undefined
+  const w = window as unknown as {
+    SpeechRecognition?: new () => SpeechRecognitionLike
+    webkitSpeechRecognition?: new () => SpeechRecognitionLike
+  }
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition
+}
+
 function PostSheet({ model, lang = 'en', onClose }: { model: BoardModel; lang?: Lang; onClose: () => void }) {
   const [drugId, setDrugId] = useState('')
   const [qty, setQty] = useState('')
@@ -461,12 +505,7 @@ function PostSheet({ model, lang = 'en', onClose }: { model: BoardModel; lang?: 
   >(null)
 
   function startListening() {
-    const SpeechAPI =
-      typeof window !== 'undefined'
-        ? (window as unknown as { SpeechRecognition?: new () => any; webkitSpeechRecognition?: new () => any })
-            .SpeechRecognition ||
-          (window as unknown as { webkitSpeechRecognition?: new () => any }).webkitSpeechRecognition
-        : undefined
+    const SpeechAPI = getSpeechRecognitionCtor()
 
     if (!SpeechAPI) {
       setIntakeNote({
@@ -487,14 +526,26 @@ function PostSheet({ model, lang = 'en', onClose }: { model: BoardModel; lang?: 
         setIntakeNote({ kind: 'info', text: 'Listening… speak your medicine need.' })
       }
       recognition.onend = () => setListening(false)
-      recognition.onerror = (e: { error?: string }) => {
+      // Dictation streams audio to the browser's own speech service — it
+      // needs a live connection even though nothing else on this screen
+      // does. That makes 'network' the single most likely failure for this
+      // app's actual users, not an edge case, so it gets its own honest
+      // message rather than falling through to a silent reset — §7: "Errors
+      // say what happened and what to do next."
+      recognition.onerror = (e) => {
         setListening(false)
-        if (e.error === 'not-allowed') {
+        if (e.error === 'not-allowed' || e.error === 'permission-denied') {
           setIntakeNote({ kind: 'error', text: 'Microphone permission denied. Allow microphone access to dictate.' })
+        } else if (e.error === 'network') {
+          setIntakeNote({ kind: 'warn', text: 'Dictation needs a signal. Type your request instead — it still works offline.' })
+        } else if (e.error === 'no-speech') {
+          setIntakeNote({ kind: 'warn', text: 'Did not catch that. Tap Dictate and try again, or type it in.' })
+        } else if (e.error !== 'aborted') {
+          setIntakeNote({ kind: 'warn', text: 'Dictation did not work this time — please type your request instead.' })
         }
       }
 
-      recognition.onresult = (event: { results?: { [index: number]: { [index: number]: { transcript: string } } } }) => {
+      recognition.onresult = (event) => {
         const transcript = event.results?.[0]?.[0]?.transcript
         if (transcript) {
           setSentence(transcript)
@@ -506,6 +557,7 @@ function PostSheet({ model, lang = 'en', onClose }: { model: BoardModel; lang?: 
       recognition.start()
     } catch {
       setListening(false)
+      setIntakeNote({ kind: 'warn', text: 'Dictation did not work this time — please type your request instead.' })
     }
   }
 

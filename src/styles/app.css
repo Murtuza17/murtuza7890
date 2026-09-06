@@ -79,6 +79,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
   padding: 8px; min-height: var(--tap); cursor: pointer;
 }
 
+/* Language switch, on the dark topbar. Same --tap rule as everything else —
+   a control a worker actually has to find and hit under time pressure does
+   not get an exception for living in a corner. */
+.lang-switch { display: flex; gap: 4px; }
+.lang-btn {
+  min-height: var(--tap); min-width: var(--tap);
+  padding: 0 10px; background: transparent; border: 1px solid rgba(255,255,255,0.35);
+  color: #fff; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer;
+}
+.lang-btn[aria-pressed="true"] { background: rgba(255,255,255,0.25); font-weight: 700; }
+
 /* Status strip. Colour AND icon AND words — sunlight kills colour first, and
    red/green is unreliable for roughly 1 in 12 men regardless. */
 .strip {

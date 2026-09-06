@@ -45,21 +45,13 @@ export function Shell({
         </div>
         <div className="topbar-spacer" />
         {onLangChange ? (
-          <div style={{ display: 'flex', gap: 4, marginRight: 8 }}>
+          <div className="lang-switch" style={{ marginRight: 8 }}>
             {(['en', 'te', 'hi'] as const).map((l) => (
               <button
                 key={l}
                 type="button"
-                style={{
-                  background: lang === l ? 'rgba(255,255,255,0.25)' : 'transparent',
-                  border: '1px solid rgba(255,255,255,0.3)',
-                  color: '#fff',
-                  borderRadius: 4,
-                  padding: '2px 6px',
-                  fontSize: 12,
-                  cursor: 'pointer',
-                  fontWeight: lang === l ? 700 : 400,
-                }}
+                className="lang-btn"
+                aria-pressed={lang === l}
                 onClick={() => onLangChange(l)}
               >
                 {LANG_LABELS[l].code}

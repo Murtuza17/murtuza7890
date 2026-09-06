@@ -29,4 +29,20 @@ describe('i18n localization', () => {
     expect(t('urgent', 'te')).toBe('అత్యవసరం')
     expect(t('urgent', 'hi')).toBe('ज़रूरी')
   })
+
+  /**
+   * Caught a real bug: tabRequests.hi once read 'అనురోధ్ / मांग' — Telugu
+   * script leaked into the Hindi slot. A worker who chose Hindi because they
+   * cannot read Telugu would have hit Telugu characters on the very first
+   * tab label. Length-only checks (the first test above) can't catch this —
+   * a non-empty string of the wrong script still passes those.
+   */
+  it('never lets one language\'s script leak into another\'s slot', () => {
+    const teluguChar = /[ఀ-౿]/
+    const devanagariChar = /[ऀ-ॿ]/
+    for (const key of Object.keys(STRINGS) as TranslationKey[]) {
+      expect(t(key, 'hi')).not.toMatch(teluguChar)
+      expect(t(key, 'te')).not.toMatch(devanagariChar)
+    }
+  })
 })

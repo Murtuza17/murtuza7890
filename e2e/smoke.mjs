@@ -241,9 +241,13 @@ console.log('== a correction can add stock back, not just remove it ==')
   // 'correction', so an undercount could never actually be added back —
   // despite the UI's own copy claiming corrections go either way.
   const { ctx, page } = await signIn('DVKD', '4567')
-  const before = await page.locator('.card').first().locator('.qty-n').innerText()
+  // The stock tab can also show an "Expiry Risk Summary" card ahead of the
+  // real batch list — it's a .card too, but has no quantity display, so
+  // filter to cards that actually are one rather than assuming position.
+  const firstBatchCard = page.locator('.card').filter({ has: page.locator('.qty-n') }).first()
+  const before = await firstBatchCard.locator('.qty-n').innerText()
 
-  await page.locator('.card').first().locator('button:has-text("Record use")').click()
+  await firstBatchCard.locator('button:has-text("Record use")').click()
   await page.waitForSelector('.sheet')
   await page.selectOption('#reason', 'correction')
   ok(await page.locator('button:has-text("Shelf has more")').isVisible(),
@@ -254,7 +258,7 @@ console.log('== a correction can add stock back, not just remove it ==')
   await page.click('.sheet button:has-text("Record 3")')
   await page.waitForTimeout(2500)
 
-  const after = await page.locator('.card').first().locator('.qty-n').innerText()
+  const after = await firstBatchCard.locator('.qty-n').innerText()
   ok(Number(after) === Number(before) + 3,
      'a "shelf has more" correction increases on-hand', `${before} -> ${after}`)
   await ctx.close()
@@ -279,6 +283,35 @@ console.log('== the board proposes a transfer nobody asked for ==')
   ok(/not a certainty/i.test(body),
      'and marks itself a prediction rather than a fact')
   await page.screenshot({ path: 'e2e/shot-suggestion.png' })
+
+  // Found by review: an earlier version sent an extra, undeclared field
+  // alongside this RPC call. Postgres's named-argument call syntax rejects
+  // any argument name the function does not declare, so the request always
+  // failed with a permanent 400 — and because outbox.applyTransportFailure
+  // treats any thrown error as "no signal, retry later" rather than a real
+  // rejection, the item stayed pending forever and (since the queue drains
+  // strictly serially, oldest first) would have jammed every action queued
+  // after it. This has to prove the whole round trip, not just that the
+  // button exists — a jam like that is invisible until something is stuck
+  // behind it.
+  const askButton = page.locator('button', { hasText: /^Ask for \d+ vials?$/ }).first()
+  const requestsBefore = await page.locator('.card', { hasText: 'Your request' }).count()
+  await askButton.click()
+  // "Request posted" flips as soon as the outbox item itself settles to
+  // done; the request then only shows under "Your requests" once the
+  // separate post-drain board refetch has come back and re-rendered — a
+  // second async step behind the first, so it can lag it slightly.
+  await page.waitForSelector('text=/Request posted/i', { timeout: 10000 })
+  ok(true, 'tapping the suggestion posts a real request, not a stuck queue item')
+  await page.waitForFunction(
+    (before) => document.querySelectorAll('.card').length >= 0 &&
+      [...document.querySelectorAll('.card')].filter((c) => c.textContent?.includes('Your request')).length > before,
+    requestsBefore,
+    { timeout: 10000 },
+  )
+  const requestsAfter = await page.locator('.card', { hasText: 'Your request' }).count()
+  ok(requestsAfter === requestsBefore + 1,
+     'and it actually appears under "Your requests", not just marked done locally')
   await ctx.close()
 }
 
